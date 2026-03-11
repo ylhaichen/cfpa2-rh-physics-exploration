@@ -17,3 +17,7 @@ cfpa2_demo/outputs/
 
 # Build/runtime artifacts
 *.log
+
+# Training artifacts
+training/datasets/
+training/models/

@@ -1,0 +1,21 @@
+training_data:
+  planner_name: rh_cfpa2
+  planner_config: configs/planner_rh_cfpa2.yaml
+  predictor_type: path_follow
+  env_configs:
+    - configs/env_maze.yaml
+    - configs/env_go2w_like.yaml
+  seed_start: 0
+  num_seeds: 100
+  episodes_per_seed: 1
+  max_steps: 300
+  shard_size: 200000
+  output_dir: training/datasets/physics_residual_dataset
+
+training:
+  manifest: training/datasets/physics_residual_dataset/manifest_merged.jsonl
+  output_checkpoint: training/models/physics_residual_mlp.pt
+  epochs: 8
+  batch_size: 2048
+  lr: 0.001
+  hidden_dims: [256, 256]

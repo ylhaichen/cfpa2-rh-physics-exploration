@@ -1,0 +1,11 @@
+planning:
+  planner_name: rh_cfpa2
+  topk_candidate_limit: 8
+  rollout:
+    horizon: 6
+    gamma: 0.90
+    virtual_reveal_radius: 4
+    virtual_gain_decay: 0.93
+predictor:
+  type: path_follow
+  horizon_steps: 8

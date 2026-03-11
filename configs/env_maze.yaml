@@ -1,0 +1,11 @@
+environment:
+  map_name: corridor_maze
+  map_type: corridor_maze
+  map_width: 96
+  map_height: 72
+  random_seed: 42
+  obstacle_density: 0.03
+robots:
+  start_positions:
+    - [4, 4]
+    - [8, 4]

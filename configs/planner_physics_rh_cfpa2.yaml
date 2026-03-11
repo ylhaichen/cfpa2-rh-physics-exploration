@@ -1,0 +1,17 @@
+planning:
+  planner_name: physics_rh_cfpa2
+  topk_candidate_limit: 8
+  rollout:
+    horizon: 6
+    gamma: 0.90
+    virtual_reveal_radius: 4
+    virtual_gain_decay: 0.93
+predictor:
+  type: physics_residual
+  horizon_steps: 8
+  physics_residual:
+    enabled: true
+    weight_file: null
+    residual_scale: 0.35
+    occupancy_patch_radius: 4
+    hidden_dims: [128, 128]

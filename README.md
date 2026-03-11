@@ -1,84 +1,69 @@
-# CFPA-2 Demo
+# Unified Multi-Robot Exploration Planner
 
-Centralized Complementary Frontier Pair Allocation (CFPA-2) demo for multi-robot frontier exploration in unknown 2D occupancy-grid environments.
+This repository is the **upgraded framework version** of:
+- https://github.com/ylhaichen/cfpa2-collaborative-exploration
 
-This repository focuses on **high-level task allocation and exploration strategy** for one or two robots. It intentionally excludes SLAM and low-level dynamics so you can evaluate exploration policies directly.
+It keeps CFPA2 baseline behavior, and extends the codebase into a unified planner framework supporting:
+- `cfpa2` (centralized myopic joint frontier assignment baseline)
+- `rh_cfpa2` (receding-horizon rollout CFPA2)
+- `physics_rh_cfpa2` (RH-CFPA2 + pluggable physics residual trajectory predictor)
 
-## Highlights
+All planners share the same:
+- map generation / occupancy representation
+- frontier extraction and representative selection
+- path planner and execution loop
+- observation model (range + FOV + LOS + occlusion)
+- metrics and logging
+- animation and video export pipeline
 
-- Shared occupancy grid with `UNKNOWN=-1`, `FREE=0`, `OCCUPIED=1`
-- Frontier detection and BFS clustering
-- A* path planning on known-free cells
-- Three modes:
-  - `single` (single robot greedy)
-  - `dual_greedy` (two robots, independent greedy baseline)
-  - `dual_joint` (CFPA-2 joint complementary assignment)
-- Event-driven replanning with hysteresis/reservation hooks
-- Live Matplotlib visualization
-- GIF/MP4 run recording
-- Reproducible experiments by seed with CSV/figure outputs
+## Relationship To Original CFPA2 Repo
 
-## Method Context
+This repo is not an unrelated rewrite. It is a structured upgrade of the original CFPA2 project:
+- CFPA2 core ideas are preserved as the baseline planner backend.
+- `rh_cfpa2` and `physics_rh_cfpa2` are added under the same interfaces.
+- Existing simulation concepts are retained and generalized into modular `core/`, `planners/`, `predictors/`, `simulators/`, and `experiments/` layers.
 
-The implementation is inspired by:
+If you already used `cfpa2-collaborative-exploration`, this repo is the next-step framework for:
+- consistent planner benchmarking
+- predictor ablations
+- large-scale data collection and training
+- future Gazebo / real Go2W high-level integration via adapters
 
-- **Yamauchi** frontier-based exploration
-- **Burgard et al.** coordinated utility/cost-based multi-robot exploration
-- **Keidar & Kaminka** stale-frontier / fast frontier-update motivation (WFD/FFD line)
-
-## Core Formulation
-
-Single-robot utility:
-
-\[
-U(r,f)=w_{ig}IG(f)-w_cC(r,f)-w_{sw}SwitchPenalty(r,f)
-\]
-
-Two-robot joint score (CFPA-2):
-
-\[
-J(f_i,f_j)=U(r_1,f_i)+U(r_2,f_j)-\lambda O(f_i,f_j)-\mu I(f_i,f_j)
-\]
-
-Implemented overlap term:
-
-\[
-O(f_i,f_j)=\exp\left(-\frac{\|p_i-p_j\|^2}{2\sigma^2}\right)
-\]
-
-In v1, path interference term `I` is a stub (`0.0`).
-
-## What "Frontier Reps" Means
-
-`frontier reps` in the plot are **frontier representatives**:
-
-- Raw frontier cells are first clustered.
-- Each cluster is reduced to one representative point.
-- Assignment/planning uses these representatives as target candidates.
-
-This keeps planning stable and avoids noisy per-cell targeting.
-
-## Repository Layout
+## Project Layout
 
 ```text
-.
-├── main.py                        # Root launcher
-├── experiments/
-│   ├── run_compare.py             # Root comparison launcher
-│   └── summarize_results.py       # Root summary launcher
-├── cfpa2_demo/
-│   ├── main.py
-│   ├── config/
-│   ├── core/
-│   ├── maps/
-│   ├── viz/
-│   ├── experiments/
-│   └── tests/
-├── outputs/
-└── requirements.txt
+configs/
+core/
+planners/
+predictors/
+simulators/
+experiments/
+training/
+tests/
 ```
 
-## Installation
+Key files:
+- planner interface: `planners/base_planner.py`
+- predictor interface: `predictors/base_predictor.py`
+- simulator interface: `simulators/base_simulator.py`
+- Go2W/Gazebo adapter hooks: `core/adapters.py`
+
+## Environment And Realism Approximation
+
+This is a **planner-level realism approximation**, not a full rigid-body physics simulator.
+
+Implemented approximations include:
+- corridor/maze/rooms+bottleneck style maps
+- configurable robot footprint/clearance in traversability
+- finite sensing range + configurable FOV
+- LOS and wall occlusion in observation
+- heading update and turning delay behavior
+- slowdown near obstacles + motion uncertainty
+- reservation/conflict/congestion proxy metrics
+
+## Quick Start
+
+Create env and install dependencies:
 
 ```bash
 python -m venv .venv
@@ -86,97 +71,138 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Quick Start
-
-Run the default live demo:
+Run one episode:
 
 ```bash
-MPLCONFIGDIR=/tmp/matplotlib python main.py --config config/default.yaml --mode dual_joint
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/run_single_experiment.py \
+  --planner cfpa2 \
+  --env-config configs/env_maze.yaml \
+  --seed 0
 ```
 
-Run without live window:
+Run planner comparison:
 
 ```bash
-MPLCONFIGDIR=/tmp/matplotlib python main.py --config config/default.yaml --mode dual_joint --no-viz
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/compare_planners_across_maps.py \
+  --env-configs configs/env_maze.yaml configs/env_go2w_like.yaml \
+  --seed-start 0 --num-seeds 3 --animate-first-seed-only
 ```
 
-Save GIF:
+Run predictor + rollout ablation:
 
 ```bash
-MPLCONFIGDIR=/tmp/matplotlib python main.py --mode dual_joint --save-animation --no-viz
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/compare_predictors.py \
+  --planners rh_cfpa2 physics_rh_cfpa2 \
+  --predictors path_follow constant_velocity physics_residual \
+  --rollout-horizons 3 5 7 \
+  --seed-start 0 --num-seeds 3 --disable-animation
 ```
 
-Save video (MP4):
+Export side-by-side planner animation:
 
 ```bash
-MPLCONFIGDIR=/tmp/matplotlib python main.py --mode dual_joint --save-video --no-viz
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/export_side_by_side_animation.py \
+  --env-config configs/env_maze.yaml --seed 0 --max-steps 240
 ```
 
-## Experiment Runs
+## Physics-RH-CFPA2 Data Collection And Training Pipeline
 
-Run mode comparison sweeps:
+The pipeline is implemented for large-scale cloud runs but **does not auto-run by default**.
+
+### 1) Large-scale dataset collection (sharded)
+
+Use distributed task splitting with `--task-index/--num-tasks`.
+
+Task 0/4 example:
 
 ```bash
-MPLCONFIGDIR=/tmp/matplotlib python experiments/run_compare.py
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python training/collect_physics_residual_dataset.py \
+  --base-config configs/base.yaml \
+  --planner-config configs/planner_rh_cfpa2.yaml \
+  --env-configs configs/env_maze.yaml configs/env_go2w_like.yaml \
+  --planner-name rh_cfpa2 \
+  --predictor-type path_follow \
+  --seed-start 0 --num-seeds 2000 \
+  --episodes-per-seed 1 \
+  --max-steps 300 \
+  --task-index 0 --num-tasks 4 \
+  --shard-size 200000 \
+  --output-dir training/datasets/physics_residual_dataset
 ```
 
-Aggregate existing comparison CSV:
+Run task index `0..3` in parallel workers/machines.
+
+### 2) Merge per-task manifests
 
 ```bash
-MPLCONFIGDIR=/tmp/matplotlib python experiments/summarize_results.py --input outputs/results_csv/compare_results.csv
+PYTHONPATH=. python training/merge_dataset_manifests.py \
+  --inputs "training/datasets/physics_residual_dataset/task*/manifest.jsonl" \
+  --output training/datasets/physics_residual_dataset/manifest_merged.jsonl
 ```
 
-## Configuration
+### 3) Train torch MLP residual predictor
 
-Primary config: `cfpa2_demo/config/default.yaml`
+```bash
+PYTHONPATH=. python training/train_physics_residual_torch.py \
+  --manifest training/datasets/physics_residual_dataset/manifest_merged.jsonl \
+  --output training/models/physics_residual_mlp.pt \
+  --epochs 8 --batch-size 2048 --lr 1e-3 --hidden-dims 256,256
+```
 
-Key knobs:
+### 4) Evaluate trained predictor
 
-- `environment`: map size/type/density/seed
-- `robots`: starts, sensing radius, LOS
-- `frontier`: clustering and frontier-rep count controls
-- `allocator`: overlap penalty and stability settings
-- `replanning`: event triggers and periodic backup
-- `termination`: coverage threshold and max steps
-- `visualization`: live plot, GIF/video saving, fps
+```bash
+PYTHONPATH=. python training/evaluate_physics_residual_torch.py \
+  --manifest training/datasets/physics_residual_dataset/manifest_merged.jsonl \
+  --checkpoint training/models/physics_residual_mlp.pt
+```
 
-Map presets:
+### 5) Use trained model in benchmark
 
-- `config/map_open.yaml`
-- `config/map_rooms.yaml`
-- `config/map_maze.yaml`
+```bash
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/compare_planners_across_maps.py \
+  --env-configs configs/env_maze.yaml \
+  --num-seeds 3 \
+  --physics-weight-file training/models/physics_residual_mlp.pt
+```
 
-## Output Artifacts
+## Outputs
 
-Generated under `outputs/`:
+Each benchmark run writes a reproducible directory:
 
-- `outputs/results_csv/*.csv`
-- `outputs/figures/*.png`
-- `outputs/animations/*.gif` or `*.mp4`
+```text
+outputs/benchmarks/<run_id>/
+  configs/
+  metadata/
+  episode_logs/
+  results_csv/
+  plots/
+```
 
-Metrics include:
+Global animation copies are also written to:
+- `outputs/animations/`
 
-- completion steps
-- coverage curve
-- replan count/reasons
-- repeated-coverage ratio
-- conflict count (dual greedy baseline)
-- frontier count statistics
+## Metrics
 
-## Assumptions and Limitations
+Unified metrics include:
+- completion steps/time
+- final coverage
+- path length per robot / total path length
+- replans / reassignment / switching
+- overlap/duplicate exploration proxy
+- conflict / congestion proxy
+- planner compute time
+- predictor inference time
+- prediction error by horizon (`h1/h3/h5`)
+- success rate across seeds
 
-- Perfect localization/map fusion (no SLAM drift)
-- Grid-world motion (1-cell step, no dynamics)
-- Centralized planner
-- Currently optimized for 1–2 robots
+## Tests
 
-## Extension Hooks
+```bash
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. pytest -q
+```
 
-- Non-zero path interference model
-- N-robot assignment strategies (Hungarian/Auction/etc.)
-- Richer sensor models and communication constraints
+## Notes
 
----
-
-Implementation details and module-level docs are also in:
-- [`cfpa2_demo/README.md`](cfpa2_demo/README.md)
+- For torch training scripts, install `torch` in your environment.
+- Legacy scripts under `cfpa2_demo/` are preserved; unified framework is the recommended path for new experiments.
