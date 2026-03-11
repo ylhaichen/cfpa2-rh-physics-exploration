@@ -1,5 +1,8 @@
 # CFPA-2 Demo
 
+> Legacy compatibility module. This folder is kept as a reference/regression baseline.
+> The default execution path for this repository is now the unified framework at the repo root (`main.py`, `experiments/run_compare.py`).
+
 Centralized Complementary Frontier Pair Allocation (CFPA-2) demo for frontier-based exploration with one or two robots on a 2D occupancy grid.
 
 ## Overview

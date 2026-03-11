@@ -109,4 +109,5 @@ class PredictorInput:
 class PredictorOutput:
     trajectory: list[Pose2D]
     inference_time_sec: float
+    uncertainty: list[float] = field(default_factory=list)
     debug: dict[str, Any] = field(default_factory=dict)

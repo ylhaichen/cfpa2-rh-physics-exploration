@@ -9,6 +9,14 @@ def test_metrics_summary_fields() -> None:
     m.log_step(0, 0.0, 0.1, 20, 4, 1.2)
     m.log_replan("initial", 0.01)
     m.log_predictor_times({1: 0.001, 2: 0.002})
+    m.log_decision_probe(
+        base_predictor="path_follow",
+        decision_signatures={
+            "path_follow": ((1, (3, 3)), (2, (6, 6))),
+            "physics_residual": ((1, (3, 3)), (2, (8, 6))),
+        },
+        predictor_scores={"path_follow": 12.0, "physics_residual": 11.2},
+    )
 
     r1 = RobotState(robot_id=1, pose=(1, 1), heading_deg=0.0)
     r2 = RobotState(robot_id=2, pose=(2, 1), heading_deg=0.0)
@@ -26,3 +34,5 @@ def test_metrics_summary_fields() -> None:
     assert row["completion_steps"] == 21
     assert row["total_path_length"] > 0
     assert "prediction_error_by_horizon" in row
+    assert "decision_divergence_rate" in row
+    assert row["decision_probe_pair_count"] >= 1

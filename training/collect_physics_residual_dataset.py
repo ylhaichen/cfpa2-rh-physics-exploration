@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -19,7 +20,11 @@ class _Snapshot:
     step_idx: int
     feature: np.ndarray
     pose: tuple[int, int]
+    heading_deg: float
     robot_id: int
+    teammate_distance: float
+    local_obstacle_density: float
+    goal: tuple[int, int] | None
 
 
 class ShardWriter:
@@ -36,6 +41,7 @@ class ShardWriter:
         self.seed_ids: list[int] = []
         self.map_names: list[str] = []
         self.planner_names: list[str] = []
+        self.scenario_tags: list[str] = []
 
         self.shard_count = 0
         self.total_samples = 0
@@ -51,17 +57,22 @@ class ShardWriter:
         seed: int,
         map_name: str,
         planner_name: str,
+        scenario_tag: str,
+        repeat: int = 1,
     ) -> None:
-        self.features.append(feature.astype(np.float32))
-        self.targets.append((float(target_dx), float(target_dy)))
-        self.robot_ids.append(int(robot_id))
-        self.step_ids.append(int(step_idx))
-        self.seed_ids.append(int(seed))
-        self.map_names.append(str(map_name))
-        self.planner_names.append(str(planner_name))
+        n = max(1, int(repeat))
+        for _ in range(n):
+            self.features.append(feature.astype(np.float32))
+            self.targets.append((float(target_dx), float(target_dy)))
+            self.robot_ids.append(int(robot_id))
+            self.step_ids.append(int(step_idx))
+            self.seed_ids.append(int(seed))
+            self.map_names.append(str(map_name))
+            self.planner_names.append(str(planner_name))
+            self.scenario_tags.append(str(scenario_tag))
 
-        if len(self.features) >= self.shard_size:
-            self.flush()
+            if len(self.features) >= self.shard_size:
+                self.flush()
 
     def flush(self) -> None:
         if not self.features:
@@ -75,6 +86,7 @@ class ShardWriter:
         seed_arr = np.asarray(self.seed_ids, dtype=np.int32)
         map_arr = np.asarray(self.map_names)
         planner_arr = np.asarray(self.planner_names)
+        scenario_arr = np.asarray(self.scenario_tags)
 
         shard_path = self.output_dir / f"{self.prefix}_shard{self.shard_count:05d}.npz"
         np.savez_compressed(
@@ -86,6 +98,7 @@ class ShardWriter:
             seed=seed_arr,
             map_name=map_arr,
             planner_name=planner_arr,
+            scenario_tag=scenario_arr,
         )
 
         self.manifest_rows.append(
@@ -105,6 +118,7 @@ class ShardWriter:
         self.seed_ids.clear()
         self.map_names.clear()
         self.planner_names.clear()
+        self.scenario_tags.clear()
 
     def finalize(self) -> tuple[Path, Path]:
         self.flush()
@@ -130,21 +144,142 @@ class ShardWriter:
         return manifest_path, meta_path
 
 
+
+def _angle_diff_deg(target: float, source: float) -> float:
+    return ((float(target) - float(source) + 180.0) % 360.0) - 180.0
+
+
+
+def _known_open_degree(map_mgr, cell: tuple[int, int]) -> int:
+    from core.map_manager import FREE
+
+    deg = 0
+    for n in map_mgr.neighbors(cell, neighborhood=4):
+        if map_mgr.in_bounds(n) and map_mgr.get_known(n) == FREE:
+            deg += 1
+    return deg
+
+
+
+def _choose_hard_map_type(rng: np.random.Generator, map_types: list[str]) -> str:
+    if not map_types:
+        return "narrow_t_branches"
+    idx = int(rng.integers(0, len(map_types)))
+    return str(map_types[idx])
+
+
+
+def _apply_hard_scenario_config(cfg: dict, hard_map_type: str, episode_seed: int) -> str:
+    env = cfg["environment"]
+    robots = cfg["robots"]
+
+    env["map_type"] = str(hard_map_type)
+    env["map_name"] = f"hard_{hard_map_type}"
+
+    # Keep map size if provided, but enforce realistic minimums for hard scenarios.
+    env["map_width"] = max(72, int(env.get("map_width", 96)))
+    env["map_height"] = max(56, int(env.get("map_height", 72)))
+
+    if hard_map_type in ("narrow_t_branches", "sharp_turn_corridor", "interaction_cross"):
+        env["obstacle_density"] = max(0.05, float(env.get("obstacle_density", 0.0)))
+    elif hard_map_type in ("bottleneck_rooms", "branching_deadend"):
+        env["obstacle_density"] = max(0.04, float(env.get("obstacle_density", 0.0)))
+
+    w = int(env["map_width"])
+    h = int(env["map_height"])
+    cx = w // 2
+    cy = h // 2
+
+    starts = list(robots.get("start_positions", [[4, 4], [8, 4]]))
+    headings = list(robots.get("start_headings_deg", [0.0, 0.0]))
+
+    if hard_map_type == "interaction_cross":
+        starts = [[max(3, cx - 10), cy], [min(w - 4, cx + 10), cy]]
+        headings = [0.0, 180.0]
+    elif hard_map_type == "sharp_turn_corridor":
+        starts = [[max(3, w // 5), max(3, h - 8)], [max(4, w // 5 + 4), max(3, h - 8)]]
+        headings = [0.0, 0.0]
+    elif hard_map_type == "narrow_t_branches":
+        starts = [[cx - 2, max(3, h - 8)], [cx + 2, max(3, h - 8)]]
+        headings = [90.0, 90.0]
+    elif hard_map_type == "bottleneck_rooms":
+        starts = [[4, 4], [8, 4]]
+        headings = [0.0, 0.0]
+    elif hard_map_type == "branching_deadend":
+        starts = [[3, 3], [5, 3]]
+        headings = [0.0, 0.0]
+
+    robots["start_positions"] = starts
+    robots["start_headings_deg"] = headings
+
+    # Bias toward near-obstacle slowdown and interaction phenomena.
+    robots["slowdown_near_obstacle"] = True
+    robots["obstacle_slowdown_distance"] = max(1, int(robots.get("obstacle_slowdown_distance", 1)))
+    robots["obstacle_slowdown_prob"] = max(0.30, float(robots.get("obstacle_slowdown_prob", 0.2)))
+    robots["motion_uncertainty_prob"] = max(0.02, float(robots.get("motion_uncertainty_prob", 0.0)))
+
+    return str(env["map_name"])
+
+
 class PhysicsResidualSampleCollector:
-    def __init__(self, cfg: dict, writer: ShardWriter, map_name: str, seed: int, planner_name: str):
+    def __init__(
+        self,
+        cfg: dict,
+        writer: ShardWriter,
+        map_name: str,
+        seed: int,
+        planner_name: str,
+        scenario_tag: str,
+        sharp_turn_threshold_deg: float,
+        near_obstacle_density_threshold: float,
+        interaction_distance_threshold: float,
+        max_repeat_factor: int,
+    ):
         self.cfg = cfg
         self.writer = writer
         self.map_name = map_name
         self.seed = int(seed)
         self.planner_name = planner_name
+        self.scenario_tag = str(scenario_tag)
 
         self.prev: dict[int, _Snapshot] = {}
         self.max_speed = float(cfg["robots"].get("max_speed_cells_per_step", 1.0))
         self.patch_radius = int(cfg.get("predictor", {}).get("physics_residual", {}).get("occupancy_patch_radius", 4))
 
+        self.sharp_turn_threshold_deg = float(sharp_turn_threshold_deg)
+        self.near_obstacle_density_threshold = float(near_obstacle_density_threshold)
+        self.interaction_distance_threshold = float(interaction_distance_threshold)
+        self.max_repeat_factor = max(1, int(max_repeat_factor))
+
     def on_event(self, event: str, payload: dict[str, Any]) -> None:
         if event == "step_begin":
             self._on_step_begin(payload)
+
+    def _transition_tags(self, prev: _Snapshot, cur: RobotState, map_mgr) -> list[str]:
+        tags: list[str] = []
+
+        yaw_change = abs(_angle_diff_deg(cur.heading_deg, prev.heading_deg))
+        if yaw_change >= self.sharp_turn_threshold_deg:
+            tags.append("sharp_turn")
+
+        if prev.local_obstacle_density >= self.near_obstacle_density_threshold:
+            tags.append("near_obstacle")
+
+        if prev.teammate_distance <= self.interaction_distance_threshold:
+            tags.append("interaction")
+
+        open_deg = _known_open_degree(map_mgr, prev.pose)
+        if open_deg <= 1:
+            tags.append("dead_end")
+        elif open_deg == 2 and prev.local_obstacle_density >= 0.20:
+            tags.append("bottleneck")
+
+        if self.scenario_tag.startswith("hard_"):
+            tags.append(self.scenario_tag)
+
+        if not tags:
+            tags.append("default")
+        return sorted(set(tags))
 
     def _on_step_begin(self, payload: dict[str, Any]) -> None:
         step_idx = int(payload["step_idx"])
@@ -161,6 +296,12 @@ class PhysicsResidualSampleCollector:
                 continue
             dx = float(cur.pose[0] - prev.pose[0])
             dy = float(cur.pose[1] - prev.pose[1])
+
+            tags = self._transition_tags(prev, cur, map_mgr)
+            hard_tags = [t for t in tags if t != "default"]
+            repeat = min(self.max_repeat_factor, 1 + len(hard_tags))
+            tag_join = "|".join(tags)
+
             self.writer.add(
                 feature=prev.feature,
                 target_dx=dx,
@@ -170,6 +311,8 @@ class PhysicsResidualSampleCollector:
                 seed=self.seed,
                 map_name=self.map_name,
                 planner_name=self.planner_name,
+                scenario_tag=tag_join,
+                repeat=repeat,
             )
 
         # Record new snapshot for next step.
@@ -195,14 +338,25 @@ class PhysicsResidualSampleCollector:
                 max_speed=self.max_speed,
             )
 
+            teammate_distance = 10.0
+            if teammate is not None:
+                teammate_distance = float(math.hypot(teammate.pose[0] - r.pose[0], teammate.pose[1] - r.pose[1]))
+
+            local_obstacle_density = float(map_mgr.obstacle_count_around(r.pose, radius=1)) / 9.0
+
             next_prev[r.robot_id] = _Snapshot(
                 step_idx=step_idx,
                 feature=feat,
                 pose=tuple(r.pose),
+                heading_deg=float(r.heading_deg),
                 robot_id=int(r.robot_id),
+                teammate_distance=float(teammate_distance),
+                local_obstacle_density=float(local_obstacle_density),
+                goal=goal,
             )
 
         self.prev = next_prev
+
 
 
 def parse_args() -> argparse.Namespace:
@@ -220,7 +374,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--num-tasks", type=int, default=1, help="Distributed collection: total tasks")
     parser.add_argument("--shard-size", type=int, default=200000)
     parser.add_argument("--output-dir", type=str, default="training/datasets/physics_residual_dataset")
+
+    parser.add_argument("--hard-scenario-oversample-prob", type=float, default=0.70)
+    parser.add_argument(
+        "--hard-scenario-map-types",
+        nargs="+",
+        default=[
+            "sharp_turn_corridor",
+            "narrow_t_branches",
+            "bottleneck_rooms",
+            "interaction_cross",
+            "branching_deadend",
+        ],
+    )
+    parser.add_argument("--sharp-turn-threshold-deg", type=float, default=55.0)
+    parser.add_argument("--near-obstacle-density-threshold", type=float, default=0.22)
+    parser.add_argument("--interaction-distance-threshold", type=float, default=4.0)
+    parser.add_argument("--max-repeat-factor", type=int, default=3)
+
     return parser.parse_args()
+
 
 
 def main() -> None:
@@ -253,6 +426,12 @@ def main() -> None:
         cfg["experiment"]["save_animation"] = False
         cfg["experiment"]["enable_live_plot"] = False
 
+        rng = np.random.default_rng(int(episode_seed) + 7919)
+        scenario_tag = "default"
+        if args.hard_scenario_oversample_prob > 0.0 and rng.random() < float(args.hard_scenario_oversample_prob):
+            hard_map_type = _choose_hard_map_type(rng, [str(v) for v in args.hard_scenario_map_types])
+            scenario_tag = _apply_hard_scenario_config(cfg, hard_map_type=hard_map_type, episode_seed=episode_seed)
+
         map_name = cfg["environment"].get("map_name", cfg["environment"].get("map_type", "map"))
         stem = f"collect_{args.planner_name}_{map_name}_seed{episode_seed}_ep{ep_idx}"
 
@@ -262,6 +441,11 @@ def main() -> None:
             map_name=map_name,
             seed=episode_seed,
             planner_name=args.planner_name,
+            scenario_tag=scenario_tag,
+            sharp_turn_threshold_deg=float(args.sharp_turn_threshold_deg),
+            near_obstacle_density_threshold=float(args.near_obstacle_density_threshold),
+            interaction_distance_threshold=float(args.interaction_distance_threshold),
+            max_repeat_factor=int(args.max_repeat_factor),
         )
 
         sim.run_episode(
@@ -275,7 +459,11 @@ def main() -> None:
 
         run_count += 1
         if run_count % 10 == 0:
-            print(f"[collector] task={task_tag} episodes={run_count} samples_so_far={writer.total_samples + len(writer.features)}", flush=True)
+            print(
+                f"[collector] task={task_tag} episodes={run_count} "
+                f"samples_so_far={writer.total_samples + len(writer.features)}",
+                flush=True,
+            )
 
     manifest_path, meta_path = writer.finalize()
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
+from statistics import pvariance
 from typing import Any
 
 import pandas as pd
@@ -44,6 +45,11 @@ class EpisodeMetrics:
     prediction_error_sums: dict[int, float] = field(default_factory=dict)
     prediction_error_counts: dict[int, int] = field(default_factory=dict)
     _pending_predictions: list[dict[str, Any]] = field(default_factory=list)
+
+    decision_probe_pair_count: int = 0
+    decision_divergence_count: int = 0
+    chosen_frontier_difference_count: int = 0
+    predictor_rollout_score_variances: list[float] = field(default_factory=list)
 
     _last_targets: dict[int, tuple[int, int] | None] = field(default_factory=dict)
 
@@ -96,6 +102,39 @@ class EpisodeMetrics:
     def log_predictor_times(self, times: dict[int, float]) -> None:
         for t in times.values():
             self.predictor_inference_times.append(float(t))
+
+    def log_decision_probe(
+        self,
+        base_predictor: str,
+        decision_signatures: dict[str, tuple[Any, ...]],
+        predictor_scores: dict[str, float],
+    ) -> None:
+        if not decision_signatures:
+            return
+        base_sig = decision_signatures.get(base_predictor)
+        if base_sig is None:
+            base_predictor = sorted(decision_signatures.keys())[0]
+            base_sig = decision_signatures[base_predictor]
+
+        score_values = [float(v) for v in predictor_scores.values()]
+        if len(score_values) >= 2:
+            self.predictor_rollout_score_variances.append(float(pvariance(score_values)))
+        else:
+            self.predictor_rollout_score_variances.append(0.0)
+
+        for name, sig in decision_signatures.items():
+            if name == base_predictor:
+                continue
+            self.decision_probe_pair_count += 1
+            diff = 0
+            n = min(len(base_sig), len(sig))
+            for i in range(n):
+                if base_sig[i] != sig[i]:
+                    diff += 1
+            diff += abs(len(base_sig) - len(sig))
+            if diff > 0:
+                self.decision_divergence_count += 1
+            self.chosen_frontier_difference_count += int(diff)
 
     def register_predictions(self, step_idx: int, predicted_paths: dict[int, list[tuple[int, int]]]) -> None:
         for rid, path in predicted_paths.items():
@@ -183,6 +222,26 @@ class EpisodeMetrics:
         )
 
         prediction_error = self.prediction_error_by_horizon()
+        score_var_mean = (
+            float(sum(self.predictor_rollout_score_variances) / len(self.predictor_rollout_score_variances))
+            if self.predictor_rollout_score_variances
+            else 0.0
+        )
+        score_var_p95 = 0.0
+        if self.predictor_rollout_score_variances:
+            vals = sorted(self.predictor_rollout_score_variances)
+            idx = int(0.95 * (len(vals) - 1))
+            score_var_p95 = float(vals[idx])
+        decision_div_rate = (
+            float(self.decision_divergence_count / self.decision_probe_pair_count)
+            if self.decision_probe_pair_count > 0
+            else 0.0
+        )
+        frontier_diff_mean = (
+            float(self.chosen_frontier_difference_count / self.decision_probe_pair_count)
+            if self.decision_probe_pair_count > 0
+            else 0.0
+        )
 
         base = {
             "planner_name": self.planner_name,
@@ -209,6 +268,13 @@ class EpisodeMetrics:
             "prediction_error_h1": float(prediction_error.get(1, 0.0)),
             "prediction_error_h3": float(prediction_error.get(3, 0.0)),
             "prediction_error_h5": float(prediction_error.get(5, 0.0)),
+            "decision_probe_pair_count": self.decision_probe_pair_count,
+            "decision_divergence_count": self.decision_divergence_count,
+            "decision_divergence_rate": decision_div_rate,
+            "chosen_frontier_difference_count": self.chosen_frontier_difference_count,
+            "chosen_frontier_difference_mean": frontier_diff_mean,
+            "predictor_rollout_score_variance_mean": score_var_mean,
+            "predictor_rollout_score_variance_p95": score_var_p95,
             "replan_reasons": json.dumps(self.replan_reasons, sort_keys=True),
         }
         base.update(self._summary_cache)

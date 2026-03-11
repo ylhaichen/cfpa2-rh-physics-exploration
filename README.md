@@ -16,6 +16,27 @@ All planners share the same:
 - metrics and logging
 - animation and video export pipeline
 
+## Default Entrypoints (Unified Framework)
+
+The default execution path is now the unified framework:
+
+```bash
+python main.py --planner cfpa2 --env narrow_t_branches
+python main.py --planner rh_cfpa2 --env narrow_t_branches
+python main.py --planner physics_rh_cfpa2 --env narrow_t_branches
+```
+
+Unified comparison wrapper:
+
+```bash
+python experiments/run_compare.py --envs maze go2w_like narrow_t_branches --num-seeds 3
+```
+
+Legacy compatibility remains available, but it is no longer the default path:
+
+- `python legacy_main.py`
+- `python experiments/legacy_run_compare.py`
+
 ## Relationship To Original CFPA2 Repo
 
 This repo is not an unrelated rewrite. It is a structured upgrade of the original CFPA2 project:
@@ -74,17 +95,17 @@ pip install -r requirements.txt
 Run one episode:
 
 ```bash
-MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/run_single_experiment.py \
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python main.py \
   --planner cfpa2 \
-  --env-config configs/env_maze.yaml \
+  --env maze \
   --seed 0
 ```
 
 Run planner comparison:
 
 ```bash
-MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/compare_planners_across_maps.py \
-  --env-configs configs/env_maze.yaml configs/env_go2w_like.yaml \
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/run_compare.py \
+  --envs maze go2w_like narrow_t_branches \
   --seed-start 0 --num-seeds 3 --animate-first-seed-only
 ```
 
@@ -95,6 +116,20 @@ MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/compare_predictors.
   --planners rh_cfpa2 physics_rh_cfpa2 \
   --predictors path_follow constant_velocity physics_residual \
   --rollout-horizons 3 5 7 \
+  --seed-start 0 --num-seeds 3 --disable-animation
+```
+
+`compare_predictors.py` now also reports planning-level sensitivity metrics:
+- `decision_divergence_rate`
+- `chosen_frontier_difference_mean`
+- `predictor_rollout_score_variance_mean`
+
+Run RH rollout score-mode ablation (`immediate_only / future_only / hybrid`):
+
+```bash
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/compare_rollout_score_modes.py \
+  --planners rh_cfpa2 physics_rh_cfpa2 \
+  --score-modes immediate_only future_only hybrid \
   --seed-start 0 --num-seeds 3 --disable-animation
 ```
 
@@ -127,6 +162,9 @@ MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python training/collect_physics_residu
   --max-steps 300 \
   --task-index 0 --num-tasks 4 \
   --shard-size 200000 \
+  --hard-scenario-oversample-prob 0.70 \
+  --hard-scenario-map-types sharp_turn_corridor narrow_t_branches bottleneck_rooms interaction_cross branching_deadend \
+  --max-repeat-factor 3 \
   --output-dir training/datasets/physics_residual_dataset
 ```
 
@@ -165,6 +203,66 @@ MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/compare_planners_ac
   --num-seeds 3 \
   --physics-weight-file training/models/physics_residual_mlp.pt
 ```
+
+### Cloud Run Checklist (Recommended)
+
+1. Prepare machine/env
+```bash
+git clone <your-upgrade-repo-url>
+cd <repo>
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -r training/requirements.txt
+```
+
+2. Distributed collection (8 workers example)
+- Worker 0 runs `--task-index 0 --num-tasks 8`
+- Worker 1 runs `--task-index 1 --num-tasks 8`
+- ...
+- Worker 7 runs `--task-index 7 --num-tasks 8`
+
+3. Merge manifests and train once all workers finish
+```bash
+PYTHONPATH=. python training/merge_dataset_manifests.py \
+  --inputs "training/datasets/physics_residual_dataset/task*/manifest.jsonl" \
+  --output training/datasets/physics_residual_dataset/manifest_merged.jsonl
+
+PYTHONPATH=. python training/train_physics_residual_torch.py \
+  --manifest training/datasets/physics_residual_dataset/manifest_merged.jsonl \
+  --output training/models/physics_residual_mlp.pt \
+  --epochs 12 --batch-size 4096 --lr 1e-3 --hidden-dims 256,256
+```
+
+4. Evaluate predictor and run planner benchmark with checkpoint
+```bash
+PYTHONPATH=. python training/evaluate_physics_residual_torch.py \
+  --manifest training/datasets/physics_residual_dataset/manifest_merged.jsonl \
+  --checkpoint training/models/physics_residual_mlp.pt
+
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/run_compare.py \
+  --planners cfpa2 rh_cfpa2 physics_rh_cfpa2 \
+  --envs narrow_t_branches maze go2w_like \
+  --seed-start 0 --num-seeds 5 --max-steps 5000 \
+  --physics-weight-file training/models/physics_residual_mlp.pt \
+  --run-id cloud_full_compare
+```
+
+5. Verify predictor impact (decision-level, not only RMSE)
+```bash
+MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. python experiments/compare_predictors.py \
+  --env-config configs/env_narrow_t_branches.yaml \
+  --planners rh_cfpa2 \
+  --predictors path_follow physics_residual \
+  --rollout-horizons 3 5 7 \
+  --seed-start 0 --num-seeds 5 --max-steps 5000 --disable-animation \
+  --run-id cloud_predictor_sensitivity
+```
+
+Key planning-sensitivity outputs:
+- `decision_divergence_rate`
+- `chosen_frontier_difference_mean`
+- `predictor_rollout_score_variance_mean`
 
 ## Outputs
 
@@ -205,4 +303,4 @@ MPLCONFIGDIR=/tmp/matplotlib PYTHONPATH=. pytest -q
 ## Notes
 
 - For torch training scripts, install `torch` in your environment.
-- Legacy scripts under `cfpa2_demo/` are preserved; unified framework is the recommended path for new experiments.
+- Legacy scripts under `cfpa2_demo/` are preserved for reference/regression only; unified framework is the default path.

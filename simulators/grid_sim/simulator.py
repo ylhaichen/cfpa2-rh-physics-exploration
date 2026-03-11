@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import math
 import shutil
 import time
@@ -71,6 +72,76 @@ def _build_robots(cfg: dict, map_mgr: MapManager) -> list[RobotState]:
 
 def _idle_assignment(robot_id: int) -> GoalAssignment:
     return GoalAssignment(robot_id=robot_id, target=None, path=[], utility=float("-inf"), valid=False, breakdown={})
+
+
+def _assignment_signature(assignments: dict[int, GoalAssignment], robots: list[RobotState]) -> tuple[tuple[int, tuple[int, int] | None], ...]:
+    sig: list[tuple[int, tuple[int, int] | None]] = []
+    for r in sorted(robots, key=lambda rr: rr.robot_id):
+        a = assignments.get(r.robot_id)
+        target = None
+        if a is not None and a.valid:
+            target = a.target
+        sig.append((int(r.robot_id), target))
+    return tuple(sig)
+
+
+def _probe_predictor_decisions(
+    planner_name: str,
+    cfg: dict,
+    map_mgr: MapManager,
+    robots: list[RobotState],
+    frontier_candidates,
+    assignments: dict[int, GoalAssignment],
+    reservation_state: dict[tuple[int, int], dict[str, int]],
+    step_idx: int,
+    sim_time: float,
+    current_output,
+) -> tuple[str, dict[str, tuple], dict[str, float]]:
+    predictor_cfg = cfg.get("predictor", {})
+    base_predictor = str(current_output.debug.get("predictor", predictor_cfg.get("type", "path_follow")))
+
+    signatures: dict[str, tuple] = {
+        base_predictor: _assignment_signature(dict(current_output.assignments), robots),
+    }
+    scores: dict[str, float] = {
+        base_predictor: float(current_output.joint_score),
+    }
+
+    analysis_cfg = cfg.get("analysis", {})
+    probe_predictors = [str(p) for p in analysis_cfg.get("decision_probe_predictors", []) if str(p).strip()]
+    if not probe_predictors:
+        return base_predictor, signatures, scores
+
+    for predictor_name in probe_predictors:
+        if predictor_name == base_predictor:
+            continue
+
+        probe_cfg = copy.deepcopy(cfg)
+        # Keep evaluation on RH core planner so predictor choice is not overridden by planner wrapper.
+        probe_cfg["planning"]["planner_name"] = "rh_cfpa2"
+        probe_cfg.setdefault("predictor", {})
+        probe_cfg["predictor"]["type"] = predictor_name
+        if predictor_name == "physics_residual":
+            probe_cfg["predictor"].setdefault("physics_residual", {})
+            probe_cfg["predictor"]["physics_residual"]["enabled"] = True
+
+        probe_planner = build_planner(probe_cfg)
+        probe_output = probe_planner.plan(
+            PlannerInput(
+                shared_map=map_mgr,
+                robot_states=robots,
+                frontier_candidates=frontier_candidates,
+                current_assignments=assignments,
+                reservation_state=reservation_state,
+                step_idx=step_idx,
+                sim_time=sim_time,
+                config=probe_cfg,
+            )
+        )
+        signatures[predictor_name] = _assignment_signature(dict(probe_output.assignments), robots)
+        scores[predictor_name] = float(probe_output.joint_score)
+
+    return base_predictor, signatures, scores
 
 
 def _execute_robot_step(
@@ -228,6 +299,7 @@ class GridSimulation(BaseSimulator):
         last_replan_reason = "init"
         last_planner_ms = 0.0
         last_predictor_ms = 0.0
+        decision_probe_calls = 0
 
         max_steps = int(cfg["termination"].get("max_steps", 1000))
         coverage_threshold = float(cfg["termination"].get("coverage_threshold", 0.95))
@@ -379,6 +451,34 @@ class GridSimulation(BaseSimulator):
                     metrics.log_predictor_times(predictor_times)
                     if predictor_times:
                         last_predictor_ms = (sum(float(v) for v in predictor_times.values()) / len(predictor_times)) * 1000.0
+
+                analysis_cfg = cfg.get("analysis", {})
+                probe_enabled = bool(analysis_cfg.get("enable_predictor_decision_probe", False))
+                max_probe = analysis_cfg.get("decision_probe_max_per_episode")
+                max_probe = None if max_probe is None else int(max_probe)
+                if (
+                    probe_enabled
+                    and planner_name in ("rh_cfpa2", "physics_rh_cfpa2")
+                    and (max_probe is None or decision_probe_calls < max_probe)
+                ):
+                    base_predictor, signatures, scores = _probe_predictor_decisions(
+                        planner_name=planner_name,
+                        cfg=cfg,
+                        map_mgr=map_mgr,
+                        robots=robots,
+                        frontier_candidates=frontier_candidates,
+                        assignments=assignments,
+                        reservation_state=reservation_state,
+                        step_idx=step_idx,
+                        sim_time=sim_time,
+                        current_output=planner_output,
+                    )
+                    metrics.log_decision_probe(
+                        base_predictor=base_predictor,
+                        decision_signatures=signatures,
+                        predictor_scores=scores,
+                    )
+                    decision_probe_calls += 1
 
             # Simple near-blocking proxy: robots trying to swap positions.
             if len(robots) >= 2:

@@ -179,6 +179,175 @@ def generate_branching_deadend(width: int, height: int, obstacle_density: float,
     return grid
 
 
+def generate_narrow_t_branches(width: int, height: int, obstacle_density: float, seed: int) -> np.ndarray:
+    """Generate a narrow T-shaped corridor map with side branches."""
+    rng = _rng(seed)
+    grid = np.full((height, width), OCCUPIED, dtype=np.int8)
+    _add_boundaries(grid)
+
+    cx = width // 2
+    y_bottom = height - 6
+    y_t = max(12, height // 3)
+
+    # Main vertical trunk of the T.
+    _carve_corridor(grid, (cx, y_bottom), (cx, y_t), width=0)
+    # Top horizontal cap of the T.
+    x_left = max(4, width // 8)
+    x_right = min(width - 5, width - width // 8)
+    _carve_corridor(grid, (x_left, y_t), (x_right, y_t), width=0)
+
+    # Slightly wider launch bay for two robots near trunk bottom.
+    bay_y0 = max(2, y_bottom - 3)
+    bay_y1 = min(height - 3, y_bottom + 1)
+    bay_x0 = max(2, cx - 3)
+    bay_x1 = min(width - 3, cx + 3)
+    grid[bay_y0 : bay_y1 + 1, bay_x0 : bay_x1 + 1] = FREE
+
+    # Side branches along the trunk, alternating left/right with random length.
+    branch_rows = list(range(y_t + 5, y_bottom - 4, 6))
+    for i, by in enumerate(branch_rows):
+        length = int(rng.integers(8, max(9, width // 5)))
+        if i % 2 == 0:
+            _carve_corridor(grid, (cx, by), (max(2, cx - length), by), width=0)
+        else:
+            _carve_corridor(grid, (cx, by), (min(width - 3, cx + length), by), width=0)
+
+        # Add short dead-end twigs to make side corridors less regular.
+        twig_len = int(rng.integers(3, 8))
+        if rng.random() < 0.5:
+            bx = max(2, cx - length) if i % 2 == 0 else min(width - 3, cx + length)
+            _carve_corridor(grid, (bx, by), (bx, min(height - 3, by + twig_len)), width=0)
+        else:
+            bx = max(2, cx - length) if i % 2 == 0 else min(width - 3, cx + length)
+            _carve_corridor(grid, (bx, by), (bx, max(2, by - twig_len)), width=0)
+
+    # Branches dropping from the T top bar.
+    top_branch_x = list(range(x_left + 6, x_right - 5, max(7, width // 14)))
+    for i, bx in enumerate(top_branch_x):
+        length = int(rng.integers(6, max(7, height // 4)))
+        end_y = min(height - 4, y_t + length)
+        _carve_corridor(grid, (bx, y_t), (bx, end_y), width=0)
+
+        # Small horizontal fork near branch end.
+        if i % 2 == 0 and end_y + 1 < height - 2:
+            fork = int(rng.integers(3, 8))
+            _carve_corridor(grid, (bx, end_y), (max(2, bx - fork), end_y), width=0)
+        elif end_y + 1 < height - 2:
+            fork = int(rng.integers(3, 8))
+            _carve_corridor(grid, (bx, end_y), (min(width - 3, bx + fork), end_y), width=0)
+
+    # Optional sparse blockers along long corridors to mimic clutter.
+    free_cells = np.argwhere(grid == FREE)
+    n_blockers = int(obstacle_density * 0.05 * len(free_cells))
+    if n_blockers > 0:
+        picks = free_cells[rng.choice(len(free_cells), size=n_blockers, replace=False)]
+        for y, x in picks:
+            # Keep trunk and top bar passable.
+            if x == cx or y == y_t:
+                continue
+            if x in (0, width - 1) or y in (0, height - 1):
+                continue
+            if rng.random() < 0.35:
+                grid[y, x] = OCCUPIED
+
+    _add_boundaries(grid)
+    return grid
+
+
+def generate_sharp_turn_corridor(width: int, height: int, obstacle_density: float, seed: int) -> np.ndarray:
+    """Generate zig-zag narrow corridors with repeated sharp turns."""
+    rng = _rng(seed)
+    grid = np.full((height, width), OCCUPIED, dtype=np.int8)
+    _add_boundaries(grid)
+
+    x_left = max(2, width // 5)
+    x_right = min(width - 3, width - width // 5)
+    y = height - 5
+    direction_right = True
+
+    while y > 4:
+        x0 = x_left if direction_right else x_right
+        x1 = x_right if direction_right else x_left
+        _carve_corridor(grid, (x0, y), (x1, y), width=0)
+        y_next = max(3, y - int(rng.integers(4, 8)))
+        _carve_corridor(grid, (x1, y), (x1, y_next), width=0)
+        y = y_next
+        direction_right = not direction_right
+
+    # Add short side pockets near corners to create ambiguous turning choices.
+    for by in range(6, height - 6, 7):
+        if rng.random() < 0.5:
+            _carve_corridor(grid, (x_left, by), (max(2, x_left - int(rng.integers(3, 6))), by), width=0)
+        else:
+            _carve_corridor(grid, (x_right, by), (min(width - 3, x_right + int(rng.integers(3, 6))), by), width=0)
+
+    # Sparse clutter for obstacle-near slowdowns.
+    free_cells = np.argwhere(grid == FREE)
+    n_blockers = int(obstacle_density * 0.06 * len(free_cells))
+    if n_blockers > 0:
+        picks = free_cells[rng.choice(len(free_cells), size=n_blockers, replace=False)]
+        for y0, x0 in picks:
+            if (x0 in (x_left, x_right)) or y0 <= 2 or y0 >= height - 3:
+                continue
+            if rng.random() < 0.4:
+                grid[y0, x0] = OCCUPIED
+
+    # Launch area.
+    grid[height - 8 : height - 3, x_left - 1 : x_left + 4] = FREE
+    _add_boundaries(grid)
+    return grid
+
+
+def generate_interaction_cross(width: int, height: int, obstacle_density: float, seed: int) -> np.ndarray:
+    """Generate crossing-heavy map with central intersection and narrow connectors."""
+    rng = _rng(seed)
+    grid = np.full((height, width), OCCUPIED, dtype=np.int8)
+    _add_boundaries(grid)
+
+    cx = width // 2
+    cy = height // 2
+
+    # Main cross structure.
+    _carve_corridor(grid, (2, cy), (width - 3, cy), width=0)
+    _carve_corridor(grid, (cx, 2), (cx, height - 3), width=0)
+
+    # Diagonal-like branch approximations via stepped segments.
+    for k in range(4, min(width, height) // 3, 4):
+        _carve_corridor(grid, (cx - k, cy - k), (cx - k, cy - k + 2), width=0)
+        _carve_corridor(grid, (cx + k, cy + k), (cx + k - 2, cy + k), width=0)
+
+    # Add interaction loops around center.
+    loop_r = max(4, min(width, height) // 8)
+    _carve_corridor(grid, (cx - loop_r, cy - loop_r), (cx + loop_r, cy - loop_r), width=0)
+    _carve_corridor(grid, (cx + loop_r, cy - loop_r), (cx + loop_r, cy + loop_r), width=0)
+    _carve_corridor(grid, (cx + loop_r, cy + loop_r), (cx - loop_r, cy + loop_r), width=0)
+    _carve_corridor(grid, (cx - loop_r, cy + loop_r), (cx - loop_r, cy - loop_r), width=0)
+
+    # Narrow side branches and dead-ends.
+    for bx in range(6, width - 6, 8):
+        length = int(rng.integers(4, 9))
+        _carve_corridor(grid, (bx, cy), (bx, max(2, cy - length)), width=0)
+        if rng.random() < 0.5:
+            _carve_corridor(grid, (bx, cy), (bx, min(height - 3, cy + length)), width=0)
+
+    # Light clutter, keep center traversable.
+    free_cells = np.argwhere(grid == FREE)
+    n_blockers = int(obstacle_density * 0.04 * len(free_cells))
+    if n_blockers > 0:
+        picks = free_cells[rng.choice(len(free_cells), size=n_blockers, replace=False)]
+        for y0, x0 in picks:
+            if abs(x0 - cx) <= 1 and abs(y0 - cy) <= 1:
+                continue
+            if rng.random() < 0.35:
+                grid[y0, x0] = OCCUPIED
+
+    # Dual launch bays at opposite sides for crossing interactions.
+    grid[cy - 2 : cy + 3, 2:7] = FREE
+    grid[cy - 2 : cy + 3, width - 7 : width - 2] = FREE
+    _add_boundaries(grid)
+    return grid
+
+
 def generate_map(map_type: str, width: int, height: int, obstacle_density: float, seed: int) -> np.ndarray:
     if map_type == "corridor_maze":
         return generate_corridor_maze(width, height, obstacle_density, seed)
@@ -186,6 +355,12 @@ def generate_map(map_type: str, width: int, height: int, obstacle_density: float
         return generate_bottleneck_rooms(width, height, obstacle_density, seed)
     if map_type == "branching_deadend":
         return generate_branching_deadend(width, height, obstacle_density, seed)
+    if map_type == "narrow_t_branches":
+        return generate_narrow_t_branches(width, height, obstacle_density, seed)
+    if map_type == "sharp_turn_corridor":
+        return generate_sharp_turn_corridor(width, height, obstacle_density, seed)
+    if map_type == "interaction_cross":
+        return generate_interaction_cross(width, height, obstacle_density, seed)
     if map_type == "open":
         grid = np.full((height, width), FREE, dtype=np.int8)
         _add_boundaries(grid)

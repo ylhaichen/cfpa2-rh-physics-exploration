@@ -65,6 +65,121 @@ def _plot_summary(df: pd.DataFrame, out_dir: Path) -> None:
         plt.close()
 
 
+def _format_table_frame(df: pd.DataFrame) -> pd.DataFrame:
+    cols = [
+        "planner_name",
+        "success_rate",
+        "completion_steps",
+        "completion_time",
+        "final_coverage",
+        "total_path_length",
+        "reassignments",
+        "switches",
+        "conflicts",
+        "congestion",
+        "planner_compute_time_ms",
+        "predictor_inference_time_ms",
+    ]
+    out = df[[c for c in cols if c in df.columns]].copy()
+    if "success_rate" in out.columns:
+        out["success_rate"] = (out["success_rate"] * 100.0).map(lambda v: f"{v:.1f}%")
+    for name, fmt in [
+        ("completion_steps", "{:.1f}"),
+        ("completion_time", "{:.1f}"),
+        ("final_coverage", "{:.3f}"),
+        ("total_path_length", "{:.1f}"),
+        ("reassignments", "{:.1f}"),
+        ("switches", "{:.1f}"),
+        ("conflicts", "{:.1f}"),
+        ("congestion", "{:.1f}"),
+        ("planner_compute_time_ms", "{:.2f}"),
+        ("predictor_inference_time_ms", "{:.2f}"),
+    ]:
+        if name in out.columns:
+            out[name] = out[name].map(lambda v, f=fmt: f.format(float(v)))
+    return out
+
+
+def _save_metrics_table(df: pd.DataFrame, out_path: Path, title: str) -> None:
+    if df.empty:
+        return
+
+    n_rows = len(df)
+    n_cols = len(df.columns)
+    fig_h = max(2.8, 1.2 + 0.55 * (n_rows + 1))
+    fig_w = max(11.0, 2.0 + 1.25 * n_cols)
+
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    ax.axis("off")
+    table = ax.table(
+        cellText=df.values.tolist(),
+        colLabels=list(df.columns),
+        cellLoc="center",
+        loc="center",
+    )
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1.0, 1.35)
+
+    for c in range(n_cols):
+        cell = table[(0, c)]
+        cell.set_facecolor("#263238")
+        cell.set_text_props(color="white", weight="bold")
+
+    for r in range(1, n_rows + 1):
+        row_color = "#F4F6F8" if r % 2 == 0 else "#FFFFFF"
+        for c in range(n_cols):
+            table[(r, c)].set_facecolor(row_color)
+
+    ax.set_title(title, fontsize=12, pad=10)
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=180)
+    plt.close()
+
+
+def _plot_metrics_tables(summary_df: pd.DataFrame, out_dir: Path) -> None:
+    if summary_df.empty:
+        return
+
+    order = ["cfpa2", "rh_cfpa2", "physics_rh_cfpa2"]
+    for map_name, sub in summary_df.groupby("map_name"):
+        sub = sub.set_index("planner_name").reindex(order).dropna(how="all").reset_index()
+        table_df = _format_table_frame(sub)
+        _save_metrics_table(
+            table_df,
+            out_dir / f"metrics_table_{map_name}.png",
+            title=f"Planner Metrics Comparison | {map_name}",
+        )
+
+    overall = (
+        summary_df.groupby("planner_name", as_index=False)[
+            [
+                "success_rate",
+                "completion_steps",
+                "completion_time",
+                "final_coverage",
+                "total_path_length",
+                "reassignments",
+                "switches",
+                "conflicts",
+                "congestion",
+                "planner_compute_time_ms",
+                "predictor_inference_time_ms",
+            ]
+        ]
+        .mean()
+        .set_index("planner_name")
+        .reindex(order)
+        .dropna(how="all")
+        .reset_index()
+    )
+    _save_metrics_table(
+        _format_table_frame(overall),
+        out_dir / "metrics_table_overall.png",
+        title="Planner Metrics Comparison | Overall Mean Across Maps",
+    )
+
+
 def main() -> None:
     args = parse_args()
 
@@ -168,6 +283,7 @@ def main() -> None:
     summary_df.to_csv(summary_csv, index=False)
 
     _plot_summary(summary_df, dirs["plots"])
+    _plot_metrics_tables(summary_df, dirs["plots"])
 
     print("\n=== Aggregate Summary ===")
     print(summary_df.to_string(index=False))

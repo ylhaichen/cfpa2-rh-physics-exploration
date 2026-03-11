@@ -21,6 +21,30 @@ class RHCFPA2Planner(BasePlanner):
         ranked = sorted(utilities.items(), key=lambda kv: kv[1].utility, reverse=True)
         return ranked[: max(1, k)]
 
+    def _combine_score(self, immediate_score: float, future_score: float, rollout_cfg: dict) -> tuple[float, dict[str, float | str]]:
+        mode = str(rollout_cfg.get("score_mode", "hybrid")).strip().lower()
+        if mode == "immediate_only":
+            return float(immediate_score), {
+                "score_mode": mode,
+                "immediate_weight": 1.0,
+                "future_weight": 0.0,
+            }
+        if mode == "future_only":
+            future_weight = float(rollout_cfg.get("future_only_weight", 1.0))
+            return float(future_weight * future_score), {
+                "score_mode": mode,
+                "immediate_weight": 0.0,
+                "future_weight": float(future_weight),
+            }
+
+        immediate_weight = float(rollout_cfg.get("immediate_weight", 1.0))
+        future_weight = float(rollout_cfg.get("future_weight", rollout_cfg.get("rollout_weight", 0.05)))
+        return float(immediate_weight * immediate_score + future_weight * future_score), {
+            "score_mode": "hybrid",
+            "immediate_weight": float(immediate_weight),
+            "future_weight": float(future_weight),
+        }
+
     def plan(self, planner_input: PlannerInput) -> PlannerOutput:
         robots = planner_input.robot_states
         map_mgr = planner_input.shared_map
@@ -78,7 +102,8 @@ class RHCFPA2Planner(BasePlanner):
         topk = int(cfg["planning"].get("topk_candidate_limit", 8))
         ranked1 = self._topk(u1, topk)
         ranked2 = self._topk(u2, topk)
-        rollout_weight = float(cfg["planning"]["rollout"].get("rollout_weight", 0.05))
+        rollout_cfg = cfg["planning"]["rollout"]
+        score_mode = str(rollout_cfg.get("score_mode", "hybrid")).strip().lower()
 
         best_pair: tuple | None = None
         best_total = float("-inf")
@@ -109,15 +134,23 @@ class RHCFPA2Planner(BasePlanner):
                     path2=ev2.path,
                     candidates=candidates,
                     predictor=self.predictor,
+                    reservation_state=reservations,
                 )
 
-                total_score = immediate_score + rollout_weight * rollout.future_score
+                total_score, combine_breakdown = self._combine_score(
+                    immediate_score=immediate_score,
+                    future_score=rollout.future_score,
+                    rollout_cfg=rollout_cfg,
+                )
                 top_scored_pairs.append(
                     {
                         "target_r1": tuple(fi),
                         "target_r2": tuple(fj),
                         "immediate_score": float(immediate_score),
                         "future_score": float(rollout.future_score),
+                        "score_mode": combine_breakdown.get("score_mode", score_mode),
+                        "immediate_weight": float(combine_breakdown.get("immediate_weight", 1.0)),
+                        "future_weight": float(combine_breakdown.get("future_weight", 0.0)),
                         "total_score": float(total_score),
                     }
                 )
@@ -131,7 +164,8 @@ class RHCFPA2Planner(BasePlanner):
                         "interference_penalty": float(interference),
                         "immediate_score": float(immediate_score),
                         "future_score": float(rollout.future_score),
-                        "rollout_weight": float(rollout_weight),
+                        "immediate_weight": float(combine_breakdown.get("immediate_weight", 1.0)),
+                        "future_weight": float(combine_breakdown.get("future_weight", 0.0)),
                         "total_score": float(total_score),
                     }
                     for k, v in rollout.breakdown.items():
@@ -180,6 +214,7 @@ class RHCFPA2Planner(BasePlanner):
         top_scored_pairs.sort(key=lambda x: x["total_score"], reverse=True)
         debug = {
             "predictor": self.predictor.name,
+            "score_mode": score_mode,
             "predictor_inference_times": best_predictor_times,
             "top_pairs": top_scored_pairs[:5],
             "u1_count": len(u1),

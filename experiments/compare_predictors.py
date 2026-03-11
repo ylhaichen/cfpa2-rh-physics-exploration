@@ -30,6 +30,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-root", type=str, default="outputs")
     parser.add_argument("--disable-animation", action="store_true")
     parser.add_argument("--physics-weight-file", type=str, default=None, help="Optional trained checkpoint for physics_residual predictor")
+    parser.add_argument("--disable-decision-probe", action="store_true", help="Disable same-state predictor decision divergence probes")
+    parser.add_argument("--decision-probe-max-replans", type=int, default=40, help="Max predictor probe calls per episode")
     return parser.parse_args()
 
 
@@ -67,6 +69,52 @@ def _plot(df: pd.DataFrame, out_dir: Path) -> None:
         plt.savefig(out_dir / f"prediction_error_h3_{planner_name}.png", dpi=160)
         plt.close()
 
+        if "decision_divergence_rate" in sub.columns:
+            plt.figure(figsize=(8.2, 4.8))
+            for predictor_name, sub2 in sub.groupby("predictor_type"):
+                x = sub2["rollout_horizon"].to_list()
+                y = sub2["decision_divergence_rate"].to_list()
+                plt.plot(x, y, marker="^", linewidth=2, label=predictor_name)
+            plt.title(f"Decision Divergence Rate | {planner_name}")
+            plt.xlabel("rollout_horizon")
+            plt.ylabel("divergence rate")
+            plt.ylim(0.0, 1.0)
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(out_dir / f"decision_divergence_rate_{planner_name}.png", dpi=160)
+            plt.close()
+
+        if "predictor_rollout_score_variance_mean" in sub.columns:
+            plt.figure(figsize=(8.2, 4.8))
+            for predictor_name, sub2 in sub.groupby("predictor_type"):
+                x = sub2["rollout_horizon"].to_list()
+                y = sub2["predictor_rollout_score_variance_mean"].to_list()
+                plt.plot(x, y, marker="d", linewidth=2, label=predictor_name)
+            plt.title(f"Predictor-Aware Rollout Score Variance | {planner_name}")
+            plt.xlabel("rollout_horizon")
+            plt.ylabel("mean score variance")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(out_dir / f"rollout_score_variance_{planner_name}.png", dpi=160)
+            plt.close()
+
+        if "chosen_frontier_difference_mean" in sub.columns:
+            plt.figure(figsize=(8.2, 4.8))
+            for predictor_name, sub2 in sub.groupby("predictor_type"):
+                x = sub2["rollout_horizon"].to_list()
+                y = sub2["chosen_frontier_difference_mean"].to_list()
+                plt.plot(x, y, marker="x", linewidth=2, label=predictor_name)
+            plt.title(f"Chosen Frontier Difference Mean | {planner_name}")
+            plt.xlabel("rollout_horizon")
+            plt.ylabel("mean different goals per probe pair")
+            plt.grid(True, alpha=0.3)
+            plt.legend()
+            plt.tight_layout()
+            plt.savefig(out_dir / f"frontier_difference_mean_{planner_name}.png", dpi=160)
+            plt.close()
+
 
 def main() -> None:
     args = parse_args()
@@ -82,6 +130,8 @@ def main() -> None:
             "planners": args.planners,
             "predictors": args.predictors,
             "rollout_horizons": args.rollout_horizons,
+            "enable_decision_probe": not bool(args.disable_decision_probe),
+            "decision_probe_max_replans": int(args.decision_probe_max_replans),
             "git_commit": git_commit_hash(),
         },
     )
@@ -97,6 +147,8 @@ def main() -> None:
             base_cfg["termination"]["max_steps"] = int(args.max_steps)
 
         for predictor_name in args.predictors:
+            if planner_name == "physics_rh_cfpa2" and predictor_name != "physics_residual":
+                continue
             for horizon in args.rollout_horizons:
                 cfg = dict(base_cfg)
                 cfg["predictor"] = dict(base_cfg.get("predictor", {}))
@@ -110,6 +162,12 @@ def main() -> None:
                 cfg["planning"] = dict(base_cfg["planning"])
                 cfg["planning"]["rollout"] = dict(base_cfg["planning"]["rollout"])
                 cfg["planning"]["rollout"]["horizon"] = int(horizon)
+                cfg["analysis"] = dict(base_cfg.get("analysis", {}))
+                if not args.disable_decision_probe:
+                    probe_predictors = sorted(set([str(p) for p in args.predictors] + ["path_follow", "physics_residual"]))
+                    cfg["analysis"]["enable_predictor_decision_probe"] = True
+                    cfg["analysis"]["decision_probe_predictors"] = probe_predictors
+                    cfg["analysis"]["decision_probe_max_per_episode"] = int(args.decision_probe_max_replans)
                 cfg["experiment"] = dict(base_cfg.get("experiment", {}))
                 if args.disable_animation:
                     cfg["experiment"]["save_animation"] = False
@@ -167,6 +225,10 @@ def main() -> None:
             prediction_error_h1=("prediction_error_h1", "mean"),
             prediction_error_h3=("prediction_error_h3", "mean"),
             prediction_error_h5=("prediction_error_h5", "mean"),
+            decision_probe_pair_count=("decision_probe_pair_count", "mean"),
+            decision_divergence_rate=("decision_divergence_rate", "mean"),
+            chosen_frontier_difference_mean=("chosen_frontier_difference_mean", "mean"),
+            predictor_rollout_score_variance_mean=("predictor_rollout_score_variance_mean", "mean"),
         )
         .sort_values(["planner_name", "completion_steps"])
     )

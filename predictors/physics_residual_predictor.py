@@ -50,12 +50,24 @@ class PhysicsResidualPredictor(BasePredictor):
         residual_scale: float = 0.35,
         occupancy_patch_radius: int = 4,
         hidden_dims: tuple[int, ...] = (128, 128),
+        enable_uncertainty: bool = True,
+        uncertainty_ensemble_samples: int = 5,
+        uncertainty_feature_noise_std: float = 0.03,
+        uncertainty_base: float = 0.03,
+        uncertainty_scale: float = 1.0,
+        uncertainty_max: float = 2.0,
     ):
         self.enabled = bool(enabled)
         self.weight_file = weight_file
         self.residual_scale = float(residual_scale)
         self.patch_radius = int(occupancy_patch_radius)
         self.hidden_dims = tuple(int(h) for h in hidden_dims)
+        self.enable_uncertainty = bool(enable_uncertainty)
+        self.uncertainty_ensemble_samples = max(1, int(uncertainty_ensemble_samples))
+        self.uncertainty_feature_noise_std = float(uncertainty_feature_noise_std)
+        self.uncertainty_base = float(uncertainty_base)
+        self.uncertainty_scale = float(uncertainty_scale)
+        self.uncertainty_max = float(uncertainty_max)
         self.fallback = PathFollowPredictor()
 
         input_dim = feature_dimension(self.patch_radius)
@@ -214,6 +226,37 @@ class PhysicsResidualPredictor(BasePredictor):
         out = self.w @ feat + self.b
         return np.tanh(out.astype(np.float32))
 
+    def _deterministic_feature_perturbation(self, feat: np.ndarray, sample_index: int) -> np.ndarray:
+        if self.uncertainty_feature_noise_std <= 0.0:
+            return feat
+        idx = np.arange(feat.shape[0], dtype=np.float32)
+        phase = float(sample_index + 1)
+        noise = self.uncertainty_feature_noise_std * np.sin(idx * (0.173 * phase) + (0.379 * phase))
+        return feat + noise.astype(np.float32)
+
+    def _infer_residual_with_uncertainty(self, feat: np.ndarray) -> tuple[np.ndarray, float]:
+        mean_residual = self._infer_residual(feat)
+        if not self.enable_uncertainty or self.uncertainty_ensemble_samples <= 1:
+            uncertainty = self.uncertainty_base
+            if not self.loaded:
+                uncertainty += 0.05
+            return mean_residual, min(self.uncertainty_max, max(0.0, uncertainty))
+
+        residuals = [mean_residual]
+        for i in range(1, self.uncertainty_ensemble_samples):
+            feat_i = self._deterministic_feature_perturbation(feat, sample_index=i)
+            residuals.append(self._infer_residual(feat_i))
+
+        arr = np.stack(residuals, axis=0).astype(np.float32)
+        mean = np.mean(arr, axis=0)
+        std_xy = np.std(arr, axis=0)
+        sigma = float(np.sqrt(float(std_xy[0] ** 2 + std_xy[1] ** 2)))
+        uncertainty = self.uncertainty_base + self.uncertainty_scale * sigma
+        if not self.loaded:
+            uncertainty += 0.05
+        uncertainty = min(self.uncertainty_max, max(0.0, uncertainty))
+        return np.tanh(mean), uncertainty
+
     def predict(self, pred_input: PredictorInput) -> PredictorOutput:
         t0 = time.perf_counter()
         base = self.fallback.predict(pred_input)
@@ -223,10 +266,12 @@ class PhysicsResidualPredictor(BasePredictor):
             return PredictorOutput(
                 trajectory=base.trajectory,
                 inference_time_sec=t1 - t0,
+                uncertainty=[0.0 for _ in base.trajectory],
                 debug={"model": self.name, "backend": "disabled", "loaded": self.loaded},
             )
 
         out: list[Pose2D] = []
+        uncertainty_out: list[float] = []
         prev_x = float(pred_input.robot_state.pose[0])
         prev_y = float(pred_input.robot_state.pose[1])
         prev_heading = float(pred_input.robot_state.heading_deg)
@@ -234,7 +279,8 @@ class PhysicsResidualPredictor(BasePredictor):
 
         for p in base.trajectory:
             feat = self._build_feature_vector(pred_input, prev_x, prev_y, prev_heading, cur_vel)
-            residual = self._infer_residual(feat) * self.residual_scale
+            residual_mean, uncertainty = self._infer_residual_with_uncertainty(feat)
+            residual = residual_mean * self.residual_scale
 
             base_dx = float(p.x - prev_x)
             base_dy = float(p.y - prev_y)
@@ -246,19 +292,27 @@ class PhysicsResidualPredictor(BasePredictor):
             heading = math.degrees(math.atan2(dy, dx)) if (abs(dx) > 1e-8 or abs(dy) > 1e-8) else prev_heading
             speed = math.hypot(dx, dy) / max(1e-6, pred_input.step_dt)
             out.append(Pose2D(x=x, y=y, heading_deg=heading, speed=speed))
+            uncertainty_out.append(float(uncertainty))
 
             cur_vel = (dx / max(1e-6, pred_input.step_dt), dy / max(1e-6, pred_input.step_dt))
             prev_x, prev_y, prev_heading = x, y, heading
 
         t1 = time.perf_counter()
+        unc_mean = float(sum(uncertainty_out) / len(uncertainty_out)) if uncertainty_out else 0.0
+        unc_max = float(max(uncertainty_out)) if uncertainty_out else 0.0
         return PredictorOutput(
             trajectory=out,
             inference_time_sec=t1 - t0,
+            uncertainty=uncertainty_out,
             debug={
                 "model": self.name,
                 "backend": self.backend,
                 "loaded": self.loaded,
                 "weight_file": self.weight_file,
                 "feature_dim": self.expected_input_dim,
+                "uncertainty_enabled": self.enable_uncertainty,
+                "uncertainty_samples": self.uncertainty_ensemble_samples,
+                "uncertainty_mean": unc_mean,
+                "uncertainty_max": unc_max,
             },
         )

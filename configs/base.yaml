@@ -68,7 +68,39 @@ planning:
     gamma: 0.90
     virtual_reveal_radius: 4
     virtual_gain_decay: 0.92
+    score_mode: hybrid
     rollout_weight: 0.05
+    immediate_weight: 1.0
+    future_weight: 0.05
+    future_only_weight: 1.0
+    virtual_sensor_range: null
+    virtual_sensor_fov_deg: null
+    virtual_use_line_of_sight: true
+    virtual_unknown_blocks_los: false
+    teammate_shared_gain_ratio: 0.5
+    frontier_consumption_weight: 0.35
+    frontier_consumption_decay: 0.98
+    reassign_coupling_passes: 2
+    frontier_density_radius: 6
+    branch_inner_radius: 4
+    branch_outer_radius: 10
+    teammate_safe_distance: 6.0
+    reassign_w_ig: 1.0
+    reassign_w_distance: 0.35
+    reassign_w_density: 0.85
+    reassign_w_branch: 0.45
+    reassign_w_teammate: 1.1
+    reassign_w_reservation: 1.0
+    lambda_corridor_occupancy: 0.25
+    lambda_narrow_blocking: 0.35
+    lambda_path_crossing: 0.20
+    lambda_waiting_time: 0.20
+    lambda_uncertainty_risk: 0.00
+    uncertainty_gain_discount: 0.00
+    uncertainty_clip: 2.0
+    corridor_near_distance: 2.5
+    blocking_window: 2
+    waiting_window: 2
 
 predictor:
   type: path_follow
@@ -81,6 +113,17 @@ predictor:
     residual_scale: 0.35
     occupancy_patch_radius: 4
     hidden_dims: [128, 128]
+    enable_uncertainty: true
+    uncertainty_ensemble_samples: 5
+    uncertainty_feature_noise_std: 0.03
+    uncertainty_base: 0.03
+    uncertainty_scale: 1.0
+    uncertainty_max: 2.0
+
+analysis:
+  enable_predictor_decision_probe: false
+  decision_probe_predictors: [path_follow, physics_residual]
+  decision_probe_max_per_episode: 40
 
 replanning:
   enable_event_replan: true

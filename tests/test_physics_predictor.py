@@ -38,4 +38,6 @@ def test_physics_predictor_npz_backend(tmp_path) -> None:
     )
 
     assert out.trajectory
+    assert len(out.uncertainty) == len(out.trajectory)
+    assert all(u >= 0.0 for u in out.uncertainty)
     assert out.debug.get("backend") in ("npz_linear", "analytic", "torch_mlp")
