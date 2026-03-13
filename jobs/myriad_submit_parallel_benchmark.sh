@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO_DIR="${REPO_DIR:-$HOME/Algorithm_Test}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+REPO_DIR="${REPO_DIR:-${DEFAULT_REPO_DIR}}"
 CONDA_SH="${CONDA_SH:-$HOME/anaconda3/etc/profile.d/conda.sh}"
 CONDA_ENV="${CONDA_ENV:-cfpa2rh}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-outputs}"

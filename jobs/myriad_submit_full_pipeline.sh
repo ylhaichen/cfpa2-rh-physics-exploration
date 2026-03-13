@@ -4,7 +4,10 @@ set -euo pipefail
 # -----------------------------
 # User-tunable defaults
 # -----------------------------
-REPO_DIR="${REPO_DIR:-$HOME/Algorithm_Test}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DEFAULT_REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+REPO_DIR="${REPO_DIR:-${DEFAULT_REPO_DIR}}"
 RUN_TAG="${RUN_TAG:-physics_pipeline_$(date +%Y%m%d_%H%M%S)}"
 RUN_ROOT="${RUN_ROOT:-$HOME/physics_runs/${RUN_TAG}}"
 VENV_PATH="${VENV_PATH:-$REPO_DIR/.venv}"
