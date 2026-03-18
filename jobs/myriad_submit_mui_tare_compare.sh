@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+BENCHMARK_TAG="${BENCHMARK_TAG:-mui_tare_compare_$(date +%Y%m%d_%H%M%S)}"
+NUM_TASKS="${NUM_TASKS:-24}"
+SEED_START="${SEED_START:-0}"
+NUM_SEEDS="${NUM_SEEDS:-10}"
+MAX_STEPS="${MAX_STEPS:-5000}"
+
+COMPARE_PLANNERS_CSV="${COMPARE_PLANNERS_CSV:-cfpa2;rh_cfpa2;physics_rh_cfpa2;mui_tare_2d}"
+COMPARE_ENV_CONFIGS_CSV="${COMPARE_ENV_CONFIGS_CSV:-configs/env_unknown_pose_overlap.yaml;configs/env_unknown_pose_ambiguous.yaml}"
+
+TASK_CORES="${TASK_CORES:-1}"
+TASK_MEM="${TASK_MEM:-6G}"
+TASK_TMPFS="${TASK_TMPFS:-20G}"
+TASK_WALLTIME="${TASK_WALLTIME:-48:00:00}"
+
+MERGE_CORES="${MERGE_CORES:-1}"
+MERGE_MEM="${MERGE_MEM:-4G}"
+MERGE_TMPFS="${MERGE_TMPFS:-8G}"
+MERGE_WALLTIME="${MERGE_WALLTIME:-06:00:00}"
+
+CONDA_SH="${CONDA_SH:-$HOME/anaconda3/etc/profile.d/conda.sh}"
+CONDA_ENV="${CONDA_ENV:-cfpa2rh}"
+OUTPUT_ROOT="${OUTPUT_ROOT:-outputs}"
+PHYSICS_WEIGHT_FILE="${PHYSICS_WEIGHT_FILE:-$HOME/physics_runs/full_20260312_172122/models/physics_residual_mlp.pt}"
+LOG_ROOT="${LOG_ROOT:-$HOME/physics_runs/benchmarks_logs/${BENCHMARK_TAG}}"
+
+mkdir -p "${LOG_ROOT}"
+
+cd "${REPO_DIR}"
+
+RUN_COMPARE=1 \
+RUN_PREDICTORS=0 \
+REPO_DIR="${REPO_DIR}" \
+CONDA_SH="${CONDA_SH}" \
+CONDA_ENV="${CONDA_ENV}" \
+OUTPUT_ROOT="${OUTPUT_ROOT}" \
+PHYSICS_WEIGHT_FILE="${PHYSICS_WEIGHT_FILE}" \
+BENCHMARK_TAG="${BENCHMARK_TAG}" \
+NUM_TASKS="${NUM_TASKS}" \
+SEED_START="${SEED_START}" \
+NUM_SEEDS="${NUM_SEEDS}" \
+MAX_STEPS="${MAX_STEPS}" \
+COMPARE_PLANNERS_CSV="${COMPARE_PLANNERS_CSV}" \
+COMPARE_ENV_CONFIGS_CSV="${COMPARE_ENV_CONFIGS_CSV}" \
+TASK_CORES="${TASK_CORES}" \
+TASK_MEM="${TASK_MEM}" \
+TASK_TMPFS="${TASK_TMPFS}" \
+TASK_WALLTIME="${TASK_WALLTIME}" \
+MERGE_CORES="${MERGE_CORES}" \
+MERGE_MEM="${MERGE_MEM}" \
+MERGE_TMPFS="${MERGE_TMPFS}" \
+MERGE_WALLTIME="${MERGE_WALLTIME}" \
+LOG_ROOT="${LOG_ROOT}" \
+bash "${SCRIPT_DIR}/myriad_submit_parallel_benchmark.sh"

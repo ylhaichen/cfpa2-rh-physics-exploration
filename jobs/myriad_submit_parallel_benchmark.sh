@@ -22,6 +22,7 @@ MAX_STEPS="${MAX_STEPS:-5000}"
 RUN_COMPARE="${RUN_COMPARE:-1}"
 RUN_PREDICTORS="${RUN_PREDICTORS:-1}"
 
+COMPARE_PLANNERS_CSV="${COMPARE_PLANNERS_CSV:-cfpa2;rh_cfpa2;physics_rh_cfpa2}"
 COMPARE_ENV_CONFIGS_CSV="${COMPARE_ENV_CONFIGS_CSV:-configs/env_narrow_t_branches.yaml;configs/env_narrow_t_dense_branches.yaml;configs/env_narrow_t_asymmetric_branches.yaml;configs/env_narrow_t_loop_branches.yaml}"
 PREDICTOR_ENV_CONFIG="${PREDICTOR_ENV_CONFIG:-configs/env_narrow_t_branches.yaml}"
 PREDICTOR_PLANNERS_CSV="${PREDICTOR_PLANNERS_CSV:-rh_cfpa2;physics_rh_cfpa2}"
@@ -76,6 +77,7 @@ VLIST="$(build_vlist \
   "MAX_STEPS=${MAX_STEPS}" \
   "RUN_COMPARE=${RUN_COMPARE}" \
   "RUN_PREDICTORS=${RUN_PREDICTORS}" \
+  "COMPARE_PLANNERS_CSV=${COMPARE_PLANNERS_CSV}" \
   "COMPARE_ENV_CONFIGS_CSV=${COMPARE_ENV_CONFIGS_CSV}" \
   "PREDICTOR_ENV_CONFIG=${PREDICTOR_ENV_CONFIG}" \
   "PREDICTOR_PLANNERS_CSV=${PREDICTOR_PLANNERS_CSV}" \

@@ -26,6 +26,7 @@ if [[ -n "${SGE_TASK_ID:-}" ]]; then
 fi
 
 IFS=';' read -r -a COMPARE_ENV_CONFIGS <<< "${COMPARE_ENV_CONFIGS_CSV:-configs/env_narrow_t_branches.yaml;configs/env_narrow_t_dense_branches.yaml;configs/env_narrow_t_asymmetric_branches.yaml;configs/env_narrow_t_loop_branches.yaml}"
+IFS=';' read -r -a COMPARE_PLANNERS <<< "${COMPARE_PLANNERS_CSV:-cfpa2;rh_cfpa2;physics_rh_cfpa2}"
 IFS=';' read -r -a PREDICTOR_PLANNERS <<< "${PREDICTOR_PLANNERS_CSV:-rh_cfpa2;physics_rh_cfpa2}"
 IFS=';' read -r -a PREDICTOR_TYPES <<< "${PREDICTOR_TYPES_CSV:-path_follow;physics_residual}"
 IFS=';' read -r -a ROLLOUT_HORIZONS <<< "${ROLLOUT_HORIZONS_CSV:-3;5;7}"
@@ -33,7 +34,7 @@ IFS=';' read -r -a ROLLOUT_HORIZONS <<< "${ROLLOUT_HORIZONS_CSV:-3;5;7}"
 if [[ "${RUN_COMPARE:-1}" == "1" ]]; then
   python experiments/parallel_compare_planners_shard.py \
     --base-config "${BASE_CONFIG:-configs/base.yaml}" \
-    --planners cfpa2 rh_cfpa2 physics_rh_cfpa2 \
+    --planners "${COMPARE_PLANNERS[@]}" \
     --env-configs "${COMPARE_ENV_CONFIGS[@]}" \
     --seed-start "${SEED_START:-0}" \
     --num-seeds "${NUM_SEEDS:-10}" \
