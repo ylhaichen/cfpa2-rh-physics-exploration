@@ -51,6 +51,23 @@ class EpisodeMetrics:
     chosen_frontier_difference_count: int = 0
     predictor_rollout_score_variances: list[float] = field(default_factory=list)
 
+    merge_attempt_count: int = 0
+    merge_success: int = 0
+    merge_step: int = -1
+    verification_count: int = 0
+    verification_total_steps: int = 0
+    rejected_hypothesis_count: int = 0
+    accepted_transform_score: float = 0.0
+    accepted_transform_overlap: int = 0
+    false_merge_count: int = 0
+    true_merge_count: int = 0
+    merge_transform_error_translation: float = 0.0
+    merge_transform_error_rotation: float = 0.0
+    pre_merge_coverage: float = 0.0
+    post_merge_coverage: float = 0.0
+    duplicate_exploration_proxy_pre_merge: float = 0.0
+    duplicate_exploration_proxy_post_merge: float = 0.0
+
     _last_targets: dict[int, tuple[int, int] | None] = field(default_factory=dict)
 
     def log_step(
@@ -197,6 +214,50 @@ class EpisodeMetrics:
             "idle_steps": int(sum(r.idle_steps for r in robots)),
         }
 
+    def update_mui_metrics(self, payload: dict[str, Any]) -> None:
+        if not payload:
+            return
+        self.merge_attempt_count = max(self.merge_attempt_count, int(payload.get("merge_attempt_count", self.merge_attempt_count)))
+        self.merge_success = max(self.merge_success, int(payload.get("merge_success", self.merge_success)))
+        merge_step = payload.get("merge_step")
+        if merge_step is not None:
+            self.merge_step = int(merge_step)
+        self.verification_count = max(self.verification_count, int(payload.get("verification_count", self.verification_count)))
+        self.verification_total_steps = max(
+            self.verification_total_steps,
+            int(payload.get("verification_total_steps", self.verification_total_steps)),
+        )
+        self.rejected_hypothesis_count = max(
+            self.rejected_hypothesis_count,
+            int(payload.get("rejected_hypothesis_count", self.rejected_hypothesis_count)),
+        )
+        if payload.get("accepted_transform_score") is not None:
+            self.accepted_transform_score = float(payload.get("accepted_transform_score", self.accepted_transform_score))
+        if payload.get("accepted_transform_overlap") is not None:
+            self.accepted_transform_overlap = int(payload.get("accepted_transform_overlap", self.accepted_transform_overlap))
+        self.false_merge_count = max(self.false_merge_count, int(payload.get("false_merge_count", self.false_merge_count)))
+        self.true_merge_count = max(self.true_merge_count, int(payload.get("true_merge_count", self.true_merge_count)))
+        if payload.get("merge_transform_error_translation") is not None:
+            self.merge_transform_error_translation = float(
+                payload.get("merge_transform_error_translation", self.merge_transform_error_translation)
+            )
+        if payload.get("merge_transform_error_rotation") is not None:
+            self.merge_transform_error_rotation = float(
+                payload.get("merge_transform_error_rotation", self.merge_transform_error_rotation)
+            )
+        if payload.get("pre_merge_coverage") is not None:
+            self.pre_merge_coverage = float(payload.get("pre_merge_coverage", self.pre_merge_coverage))
+        if payload.get("post_merge_coverage") is not None:
+            self.post_merge_coverage = float(payload.get("post_merge_coverage", self.post_merge_coverage))
+        if payload.get("duplicate_exploration_proxy_pre_merge") is not None:
+            self.duplicate_exploration_proxy_pre_merge = float(
+                payload.get("duplicate_exploration_proxy_pre_merge", self.duplicate_exploration_proxy_pre_merge)
+            )
+        if payload.get("duplicate_exploration_proxy_post_merge") is not None:
+            self.duplicate_exploration_proxy_post_merge = float(
+                payload.get("duplicate_exploration_proxy_post_merge", self.duplicate_exploration_proxy_post_merge)
+            )
+
     def prediction_error_by_horizon(self) -> dict[int, float]:
         out: dict[int, float] = {}
         for h, s in self.prediction_error_sums.items():
@@ -276,6 +337,22 @@ class EpisodeMetrics:
             "predictor_rollout_score_variance_mean": score_var_mean,
             "predictor_rollout_score_variance_p95": score_var_p95,
             "replan_reasons": json.dumps(self.replan_reasons, sort_keys=True),
+            "merge_attempt_count": self.merge_attempt_count,
+            "merge_success": self.merge_success,
+            "merge_step": self.merge_step,
+            "verification_count": self.verification_count,
+            "verification_total_steps": self.verification_total_steps,
+            "rejected_hypothesis_count": self.rejected_hypothesis_count,
+            "accepted_transform_score": self.accepted_transform_score,
+            "accepted_transform_overlap": self.accepted_transform_overlap,
+            "false_merge_count": self.false_merge_count,
+            "true_merge_count": self.true_merge_count,
+            "merge_transform_error_translation": self.merge_transform_error_translation,
+            "merge_transform_error_rotation": self.merge_transform_error_rotation,
+            "pre_merge_coverage": self.pre_merge_coverage,
+            "post_merge_coverage": self.post_merge_coverage,
+            "duplicate_exploration_proxy_pre_merge": self.duplicate_exploration_proxy_pre_merge,
+            "duplicate_exploration_proxy_post_merge": self.duplicate_exploration_proxy_post_merge,
         }
         base.update(self._summary_cache)
         return base

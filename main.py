@@ -12,6 +12,7 @@ PLANNER_CFG = {
     "cfpa2": "configs/planner_cfpa2.yaml",
     "rh_cfpa2": "configs/planner_rh_cfpa2.yaml",
     "physics_rh_cfpa2": "configs/planner_physics_rh_cfpa2.yaml",
+    "mui_tare_2d": "configs/planner_mui_tare.yaml",
 }
 
 ENV_CFG = {
@@ -20,19 +21,21 @@ ENV_CFG = {
     "narrow_t_dense_branches": "configs/env_narrow_t_dense_branches.yaml",
     "narrow_t_asymmetric_branches": "configs/env_narrow_t_asymmetric_branches.yaml",
     "narrow_t_loop_branches": "configs/env_narrow_t_loop_branches.yaml",
+    "unknown_pose_overlap": "configs/env_unknown_pose_overlap.yaml",
+    "unknown_pose_ambiguous": "configs/env_unknown_pose_ambiguous.yaml",
 }
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Unified multi-robot exploration entrypoint")
     parser.add_argument("--base-config", type=str, default="configs/base.yaml")
-    parser.add_argument("--planner", type=str, default="cfpa2", choices=["cfpa2", "rh_cfpa2", "physics_rh_cfpa2"])
+    parser.add_argument("--planner", type=str, default="cfpa2", choices=["cfpa2", "rh_cfpa2", "physics_rh_cfpa2", "mui_tare_2d"])
     parser.add_argument("--planner-config", type=str, default=None)
     parser.add_argument(
         "--env",
         type=str,
         default="narrow_t_branches",
-        choices=["maze", "narrow_t_branches", "narrow_t_dense_branches", "narrow_t_asymmetric_branches", "narrow_t_loop_branches"],
+        choices=["maze", "narrow_t_branches", "narrow_t_dense_branches", "narrow_t_asymmetric_branches", "narrow_t_loop_branches", "unknown_pose_overlap", "unknown_pose_ambiguous"],
         help="Named environment preset; ignored when --env-config is provided.",
     )
     parser.add_argument("--env-config", type=str, default=None, help="Direct environment config path override")

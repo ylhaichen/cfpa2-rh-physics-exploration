@@ -29,26 +29,41 @@ def _neighbors(cell: Cell, neighborhood: int) -> list[Cell]:
 
 
 def is_frontier_cell(map_mgr: MapManager, cell: Cell, neighborhood: int = 8, grid: np.ndarray | None = None) -> bool:
-    arr = map_mgr.known if grid is None else grid
     if not map_mgr.in_bounds(cell):
         return False
-    x, y = cell
-    if int(arr[y, x]) != FREE:
+    if grid is None:
+        value = map_mgr.get_known(cell)
+    elif hasattr(map_mgr, "grid_value"):
+        value = int(map_mgr.grid_value(cell, grid))
+    else:
+        x, y = cell
+        value = int(grid[y, x])
+    if value != FREE:
         return False
     for n in _neighbors(cell, neighborhood):
         if map_mgr.in_bounds(n):
-            nx, ny = n
-            if int(arr[ny, nx]) == UNKNOWN:
+            if grid is None:
+                n_value = map_mgr.get_known(n)
+            elif hasattr(map_mgr, "grid_value"):
+                n_value = int(map_mgr.grid_value(n, grid))
+            else:
+                nx, ny = n
+                n_value = int(grid[ny, nx])
+            if n_value == UNKNOWN:
                 return True
     return False
 
 
 def detect_frontiers(map_mgr: MapManager, neighborhood: int = 8, grid: np.ndarray | None = None) -> list[Cell]:
     arr = map_mgr.known if grid is None else grid
-    ys, xs = np.where(arr == FREE)
+    if hasattr(map_mgr, "iter_cells_with_value"):
+        candidate_cells = map_mgr.iter_cells_with_value(FREE, grid=grid)
+    else:
+        ys, xs = np.where(arr == FREE)
+        candidate_cells = [(int(x), int(y)) for y, x in zip(ys.tolist(), xs.tolist())]
+
     frontiers: list[Cell] = []
-    for y, x in zip(ys.tolist(), xs.tolist()):
-        cell = (x, y)
+    for cell in candidate_cells:
         if is_frontier_cell(map_mgr, cell, neighborhood=neighborhood, grid=arr):
             frontiers.append(cell)
     return frontiers

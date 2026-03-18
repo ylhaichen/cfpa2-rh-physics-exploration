@@ -67,6 +67,15 @@ def main() -> None:
             congestion=("congestion_count", "mean"),
             planner_compute_time_ms=("planner_compute_time_ms_mean", "mean"),
             predictor_inference_time_ms=("predictor_inference_time_ms_mean", "mean"),
+            merge_success=("merge_success", "mean"),
+            merge_step=("merge_step", "mean"),
+            verification_count=("verification_count", "mean"),
+            verification_total_steps=("verification_total_steps", "mean"),
+            accepted_transform_score=("accepted_transform_score", "mean"),
+            accepted_transform_overlap=("accepted_transform_overlap", "mean"),
+            false_merge_count=("false_merge_count", "mean"),
+            merge_transform_error_translation=("merge_transform_error_translation", "mean"),
+            merge_transform_error_rotation=("merge_transform_error_rotation", "mean"),
         )
         .sort_values(["map_name", "completion_steps"])
     )

@@ -1,0 +1,19 @@
+environment:
+  map_name: unknown_pose_ambiguous
+  map_type: unknown_pose_ambiguous
+  map_width: 96
+  map_height: 72
+  obstacle_density: 0.01
+
+robots:
+  num_robots: 2
+  start_positions:
+    - [16, 28]
+    - [80, 44]
+  start_headings_deg:
+    - 0.0
+    - 180.0
+
+termination:
+  coverage_threshold: 0.95
+  max_steps: 5000

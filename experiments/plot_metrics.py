@@ -54,6 +54,43 @@ def _plot_compute_vs_coverage(df: pd.DataFrame, out_dir: Path) -> None:
     plt.close()
 
 
+def _plot_merge_metrics_table(df: pd.DataFrame, out_dir: Path) -> None:
+    cols = [
+        "planner_name",
+        "map_name",
+        "merge_success",
+        "merge_step",
+        "verification_count",
+        "verification_total_steps",
+        "accepted_transform_score",
+        "accepted_transform_overlap",
+        "false_merge_count",
+    ]
+    present = [c for c in cols if c in df.columns]
+    if len(present) <= 2:
+        return
+    table_df = df[present].copy()
+    if "merge_success" in table_df.columns:
+        table_df["merge_success"] = (table_df["merge_success"] * 100.0).map(lambda v: f"{float(v):.1f}%")
+    for col in table_df.columns:
+        if col in {"planner_name", "map_name", "merge_success"}:
+            continue
+        table_df[col] = table_df[col].map(lambda v: f"{float(v):.2f}")
+
+    fig_h = max(2.8, 1.2 + 0.55 * (len(table_df) + 1))
+    fig_w = max(10.5, 2.0 + 1.25 * len(table_df.columns))
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    ax.axis("off")
+    table = ax.table(cellText=table_df.values.tolist(), colLabels=list(table_df.columns), cellLoc="center", loc="center")
+    table.auto_set_font_size(False)
+    table.set_fontsize(9)
+    table.scale(1.0, 1.35)
+    ax.set_title("Merge Metrics", fontsize=12, pad=10)
+    plt.tight_layout()
+    plt.savefig(out_dir / "metrics_table_merge.png", dpi=160)
+    plt.close(fig)
+
+
 def main() -> None:
     args = parse_args()
     input_path = Path(args.input)
@@ -66,6 +103,7 @@ def main() -> None:
 
     _boxplot_completion(df, out_dir)
     _plot_compute_vs_coverage(df, out_dir)
+    _plot_merge_metrics_table(df, out_dir)
 
     print(f"plots_dir: {out_dir}")
 

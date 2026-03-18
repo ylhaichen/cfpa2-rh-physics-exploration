@@ -44,6 +44,38 @@ def _cfg(planner_name: str) -> dict:
                 "rollout_weight": 0.05,
             },
         },
+        "mapping": {
+            "regime": "local_submaps_unknown_pose",
+            "allowed_rotations_deg": [0, 90, 180, 270],
+            "local_map_padding": 20,
+        },
+        "matching": {
+            "allowed_rotations_deg": [0, 90, 180, 270],
+            "search_dx": 10,
+            "search_dy": 10,
+            "top_k_hypotheses": 5,
+            "min_overlap_cells": 4,
+            "accept_min_overlap": 8,
+            "reject_min_overlap": 2,
+            "accept_score_threshold": 0.8,
+            "reject_score_threshold": 0.3,
+            "ambiguity_gap": 0.1,
+            "w_occ": 2.0,
+            "w_free": 1.0,
+            "w_mismatch": 3.0,
+            "blacklist_ttl": 5,
+        },
+        "verification": {
+            "enabled": True,
+            "strategy": "projected_history",
+            "max_steps": 10,
+            "max_attempts_per_pair": 2,
+            "obs_threshold": 5,
+            "score_radius": 3,
+            "lambda_dist": 0.1,
+            "lambda_risk": 0.1,
+        },
+        "post_merge": {"planner_name": "cfpa2"},
         "predictor": {
             "type": "path_follow",
             "horizon_steps": 6,
@@ -123,3 +155,8 @@ def test_physics_rh_cfpa2_planner_runs() -> None:
     out = planner.plan(planner_input)
     assert out.assignments
     assert out.planner_name == "rh_cfpa2" or out.planner_name == "physics_rh_cfpa2"
+
+
+def test_mui_tare_planner_builds() -> None:
+    planner = build_planner(_cfg("mui_tare_2d"))
+    assert planner.name == "mui_tare_2d"

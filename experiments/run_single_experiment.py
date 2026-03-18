@@ -20,7 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-config", type=str, default="configs/base.yaml")
     parser.add_argument("--planner-config", type=str, default=None)
     parser.add_argument("--env-config", type=str, default="configs/env_maze.yaml")
-    parser.add_argument("--planner", type=str, default="cfpa2", choices=["cfpa2", "rh_cfpa2", "physics_rh_cfpa2"])
+    parser.add_argument("--planner", type=str, default="cfpa2", choices=["cfpa2", "rh_cfpa2", "physics_rh_cfpa2", "mui_tare_2d"])
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--run-id", type=str, default=None)
     parser.add_argument("--output-root", type=str, default="outputs")
@@ -35,6 +35,8 @@ def default_planner_cfg(planner_name: str) -> str:
         return "configs/planner_cfpa2.yaml"
     if planner_name == "rh_cfpa2":
         return "configs/planner_rh_cfpa2.yaml"
+    if planner_name == "mui_tare_2d":
+        return "configs/planner_mui_tare.yaml"
     return "configs/planner_physics_rh_cfpa2.yaml"
 
 

@@ -16,6 +16,8 @@ ENV_CFG = {
     "narrow_t_dense_branches": "configs/env_narrow_t_dense_branches.yaml",
     "narrow_t_asymmetric_branches": "configs/env_narrow_t_asymmetric_branches.yaml",
     "narrow_t_loop_branches": "configs/env_narrow_t_loop_branches.yaml",
+    "unknown_pose_overlap": "configs/env_unknown_pose_overlap.yaml",
+    "unknown_pose_ambiguous": "configs/env_unknown_pose_ambiguous.yaml",
 }
 
 
@@ -26,13 +28,13 @@ def parse_args() -> argparse.Namespace:
         "--planners",
         nargs="+",
         default=["cfpa2", "rh_cfpa2", "physics_rh_cfpa2"],
-        choices=["cfpa2", "rh_cfpa2", "physics_rh_cfpa2"],
+        choices=["cfpa2", "rh_cfpa2", "physics_rh_cfpa2", "mui_tare_2d"],
     )
     parser.add_argument(
         "--envs",
         nargs="+",
-        default=["maze", "narrow_t_branches", "narrow_t_asymmetric_branches", "narrow_t_loop_branches"],
-        choices=["maze", "narrow_t_branches", "narrow_t_dense_branches", "narrow_t_asymmetric_branches", "narrow_t_loop_branches"],
+        default=["maze", "narrow_t_branches", "narrow_t_asymmetric_branches", "narrow_t_loop_branches", "unknown_pose_overlap", "unknown_pose_ambiguous"],
+        choices=["maze", "narrow_t_branches", "narrow_t_dense_branches", "narrow_t_asymmetric_branches", "narrow_t_loop_branches", "unknown_pose_overlap", "unknown_pose_ambiguous"],
         help="Named env presets; ignored when --env-configs is provided.",
     )
     parser.add_argument("--env-configs", nargs="+", default=None, help="Direct env config paths")

@@ -1,0 +1,19 @@
+environment:
+  map_name: unknown_pose_overlap
+  map_type: unknown_pose_overlap
+  map_width: 96
+  map_height: 72
+  obstacle_density: 0.02
+
+robots:
+  num_robots: 2
+  start_positions:
+    - [8, 36]
+    - [88, 36]
+  start_headings_deg:
+    - 0.0
+    - 180.0
+
+termination:
+  coverage_threshold: 0.95
+  max_steps: 5000

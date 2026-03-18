@@ -19,17 +19,18 @@ PLANNER_CFG = {
     "cfpa2": "configs/planner_cfpa2.yaml",
     "rh_cfpa2": "configs/planner_rh_cfpa2.yaml",
     "physics_rh_cfpa2": "configs/planner_physics_rh_cfpa2.yaml",
+    "mui_tare_2d": "configs/planner_mui_tare.yaml",
 }
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Benchmark CFPA2 / RH-CFPA2 / Physics-RH-CFPA2 across maps")
+    parser = argparse.ArgumentParser(description="Benchmark unified planners across maps")
     parser.add_argument("--base-config", type=str, default="configs/base.yaml")
     parser.add_argument(
         "--planners",
         nargs="+",
         default=["cfpa2", "rh_cfpa2", "physics_rh_cfpa2"],
-        choices=["cfpa2", "rh_cfpa2", "physics_rh_cfpa2"],
+        choices=["cfpa2", "rh_cfpa2", "physics_rh_cfpa2", "mui_tare_2d"],
     )
     parser.add_argument(
         "--env-configs",
@@ -39,6 +40,8 @@ def parse_args() -> argparse.Namespace:
             "configs/env_narrow_t_branches.yaml",
             "configs/env_narrow_t_asymmetric_branches.yaml",
             "configs/env_narrow_t_loop_branches.yaml",
+            "configs/env_unknown_pose_overlap.yaml",
+            "configs/env_unknown_pose_ambiguous.yaml",
         ],
     )
     parser.add_argument("--seed-start", type=int, default=0)
@@ -59,9 +62,9 @@ def _plot_summary(df: pd.DataFrame, out_dir: Path) -> None:
 
     for map_name, sub in df.groupby("map_name"):
         plt.figure(figsize=(8.0, 4.5))
-        order = ["cfpa2", "rh_cfpa2", "physics_rh_cfpa2"]
+        order = ["cfpa2", "rh_cfpa2", "physics_rh_cfpa2", "mui_tare_2d"]
         sub = sub.set_index("planner_name").reindex(order).dropna(how="all").reset_index()
-        plt.bar(sub["planner_name"], sub["completion_steps"], color=["#6D4C41", "#1976D2", "#2E7D32"][: len(sub)])
+        plt.bar(sub["planner_name"], sub["completion_steps"], color=["#6D4C41", "#1976D2", "#2E7D32", "#8E24AA"][: len(sub)])
         plt.title(f"Mean Completion Steps | {map_name}")
         plt.ylabel("steps")
         plt.grid(axis="y", alpha=0.3)
@@ -70,7 +73,7 @@ def _plot_summary(df: pd.DataFrame, out_dir: Path) -> None:
         plt.close()
 
         plt.figure(figsize=(8.0, 4.5))
-        plt.bar(sub["planner_name"], sub["final_coverage"], color=["#8D6E63", "#42A5F5", "#66BB6A"][: len(sub)])
+        plt.bar(sub["planner_name"], sub["final_coverage"], color=["#8D6E63", "#42A5F5", "#66BB6A", "#BA68C8"][: len(sub)])
         plt.title(f"Final Coverage | {map_name}")
         plt.ylim(0.0, 1.01)
         plt.grid(axis="y", alpha=0.3)
@@ -93,6 +96,9 @@ def _format_table_frame(df: pd.DataFrame) -> pd.DataFrame:
         "congestion",
         "planner_compute_time_ms",
         "predictor_inference_time_ms",
+        "merge_success_rate",
+        "merge_step",
+        "verification_count",
     ]
     out = df[[c for c in cols if c in df.columns]].copy()
     if "success_rate" in out.columns:
@@ -108,9 +114,15 @@ def _format_table_frame(df: pd.DataFrame) -> pd.DataFrame:
         ("congestion", "{:.1f}"),
         ("planner_compute_time_ms", "{:.2f}"),
         ("predictor_inference_time_ms", "{:.2f}"),
+        ("merge_success_rate", "{:.1f}%"),
+        ("merge_step", "{:.1f}"),
+        ("verification_count", "{:.1f}"),
     ]:
         if name in out.columns:
-            out[name] = out[name].map(lambda v, f=fmt: f.format(float(v)))
+            if name == "merge_success_rate":
+                out[name] = out[name].map(lambda v, f=fmt: f.format(float(v) * 100.0))
+            else:
+                out[name] = out[name].map(lambda v, f=fmt: f.format(float(v)))
     return out
 
 
@@ -155,7 +167,7 @@ def _plot_metrics_tables(summary_df: pd.DataFrame, out_dir: Path) -> None:
     if summary_df.empty:
         return
 
-    order = ["cfpa2", "rh_cfpa2", "physics_rh_cfpa2"]
+    order = ["cfpa2", "rh_cfpa2", "physics_rh_cfpa2", "mui_tare_2d"]
     for map_name, sub in summary_df.groupby("map_name"):
         sub = sub.set_index("planner_name").reindex(order).dropna(how="all").reset_index()
         table_df = _format_table_frame(sub)
@@ -192,6 +204,29 @@ def _plot_metrics_tables(summary_df: pd.DataFrame, out_dir: Path) -> None:
         out_dir / "metrics_table_overall.png",
         title="Planner Metrics Comparison | Overall Mean Across Maps",
     )
+
+    if "merge_success" in summary_df.columns:
+        merge_cols = [
+            "planner_name",
+            "map_name",
+            "merge_success",
+            "merge_step",
+            "verification_count",
+            "verification_total_steps",
+            "accepted_transform_score",
+            "accepted_transform_overlap",
+            "false_merge_count",
+            "merge_transform_error_translation",
+            "merge_transform_error_rotation",
+        ]
+        merge_df = summary_df[[c for c in merge_cols if c in summary_df.columns]].copy()
+        if "merge_success" in merge_df.columns:
+            merge_df = merge_df.rename(columns={"merge_success": "merge_success_rate"})
+        _save_metrics_table(
+            _format_table_frame(merge_df),
+            out_dir / "metrics_table_merge.png",
+            title="Planner Metrics Comparison | Merge Metrics",
+        )
 
 
 def main() -> None:
@@ -290,6 +325,15 @@ def main() -> None:
             congestion=("congestion_count", "mean"),
             planner_compute_time_ms=("planner_compute_time_ms_mean", "mean"),
             predictor_inference_time_ms=("predictor_inference_time_ms_mean", "mean"),
+            merge_success=("merge_success", "mean"),
+            merge_step=("merge_step", "mean"),
+            verification_count=("verification_count", "mean"),
+            verification_total_steps=("verification_total_steps", "mean"),
+            accepted_transform_score=("accepted_transform_score", "mean"),
+            accepted_transform_overlap=("accepted_transform_overlap", "mean"),
+            false_merge_count=("false_merge_count", "mean"),
+            merge_transform_error_translation=("merge_transform_error_translation", "mean"),
+            merge_transform_error_rotation=("merge_transform_error_rotation", "mean"),
         )
         .sort_values(["map_name", "completion_steps"])
     )

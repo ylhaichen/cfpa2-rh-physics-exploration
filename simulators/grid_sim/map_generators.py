@@ -510,6 +510,106 @@ def generate_interaction_cross(width: int, height: int, obstacle_density: float,
     return grid
 
 
+def generate_unknown_pose_overlap(width: int, height: int, obstacle_density: float, seed: int) -> np.ndarray:
+    """Indoor corridor-room map with a clear shared overlap zone after exploration."""
+    rng = _rng(seed)
+    grid = np.full((height, width), OCCUPIED, dtype=np.int8)
+    _add_boundaries(grid)
+
+    cy = height // 2
+    left_room_x0 = 3
+    left_room_x1 = max(14, width // 5)
+    right_room_x0 = min(width - max(14, width // 5), width - 15)
+    right_room_x1 = width - 4
+    room_y0 = max(3, cy - 5)
+    room_y1 = min(height - 4, cy + 5)
+
+    grid[room_y0 : room_y1 + 1, left_room_x0 : left_room_x1 + 1] = FREE
+    grid[room_y0 : room_y1 + 1, right_room_x0 : right_room_x1 + 1] = FREE
+
+    trunk_x0 = left_room_x1
+    trunk_x1 = right_room_x0
+    _carve_corridor(grid, (trunk_x0, cy), (trunk_x1, cy), width=0)
+
+    # Central overlap-rich structure.
+    cx0 = width // 2 - 6
+    cx1 = width // 2 + 6
+    grid[cy - 4 : cy + 5, cx0 : cx1 + 1] = FREE
+    _carve_corridor(grid, (width // 2, cy - 12), (width // 2, cy + 12), width=0)
+    _carve_corridor(grid, (cx0, cy - 8), (cx1, cy - 8), width=0)
+    _carve_corridor(grid, (cx0, cy + 8), (cx1, cy + 8), width=0)
+
+    for bx in range(cx0 + 3, cx1, 5):
+        length = int(rng.integers(4, 8))
+        _carve_corridor(grid, (bx, cy - 8), (bx, max(2, cy - 8 - length)), width=0)
+        _carve_corridor(grid, (bx, cy + 8), (bx, min(height - 3, cy + 8 + length)), width=0)
+
+    # Side pockets near the two starts.
+    _carve_corridor(grid, (left_room_x1 - 2, cy - 2), (left_room_x1 - 2, max(2, cy - 10)), width=0)
+    _carve_corridor(grid, (right_room_x0 + 2, cy + 2), (right_room_x0 + 2, min(height - 3, cy + 10)), width=0)
+
+    free_cells = np.argwhere(grid == FREE)
+    n_blockers = int(obstacle_density * 0.03 * len(free_cells))
+    if n_blockers > 0:
+        picks = free_cells[rng.choice(len(free_cells), size=n_blockers, replace=False)]
+        for y, x in picks:
+            if abs(x - width // 2) <= 2 and abs(y - cy) <= 10:
+                continue
+            if rng.random() < 0.25:
+                grid[y, x] = OCCUPIED
+
+    _add_boundaries(grid)
+    return grid
+
+
+def generate_unknown_pose_ambiguous(width: int, height: int, obstacle_density: float, seed: int) -> np.ndarray:
+    """Symmetry-heavy repeated corridor map that tends to create ambiguous matches."""
+    rng = _rng(seed)
+    grid = np.full((height, width), OCCUPIED, dtype=np.int8)
+    _add_boundaries(grid)
+
+    cy = height // 2
+    upper = max(6, cy - 8)
+    lower = min(height - 7, cy + 8)
+    left = max(4, width // 6)
+    right = min(width - 5, width - width // 6)
+
+    # Two repeated long corridors with mirrored branches.
+    _carve_corridor(grid, (left, upper), (right, upper), width=0)
+    _carve_corridor(grid, (left, lower), (right, lower), width=0)
+    _carve_corridor(grid, (left, upper), (left, lower), width=0)
+    _carve_corridor(grid, (right, upper), (right, lower), width=0)
+
+    center_xs = [width // 2 - 6, width // 2, width // 2 + 6]
+    for cx in center_xs:
+        _carve_corridor(grid, (cx, upper), (cx, lower), width=0)
+
+    branch_xs = list(range(left + 6, right - 5, 8))
+    for bx in branch_xs:
+        twig = int(rng.integers(4, 8))
+        _carve_corridor(grid, (bx, upper), (bx, max(2, upper - twig)), width=0)
+        _carve_corridor(grid, (bx, lower), (bx, min(height - 3, lower + twig)), width=0)
+
+    # Repeated pocket rooms that make data association ambiguous until more evidence is gathered.
+    pocket_w = 5
+    for bx in [left + 10, width // 2 - 10, width // 2 + 10, right - 10]:
+        grid[max(2, upper - 4) : upper, max(2, bx - pocket_w) : min(width - 2, bx + pocket_w)] = FREE
+        grid[lower + 1 : min(height - 2, lower + 5), max(2, bx - pocket_w) : min(width - 2, bx + pocket_w)] = FREE
+
+    free_cells = np.argwhere(grid == FREE)
+    n_blockers = int(obstacle_density * 0.02 * len(free_cells))
+    if n_blockers > 0:
+        picks = free_cells[rng.choice(len(free_cells), size=n_blockers, replace=False)]
+        for y, x in picks:
+            if x in center_xs or y in (upper, lower):
+                continue
+            if rng.random() < 0.18:
+                grid[y, x] = OCCUPIED
+
+    _add_boundaries(grid)
+    return grid
+
+
 def generate_map(map_type: str, width: int, height: int, obstacle_density: float, seed: int) -> np.ndarray:
     if map_type == "corridor_maze":
         return generate_corridor_maze(width, height, obstacle_density, seed)
@@ -529,6 +629,10 @@ def generate_map(map_type: str, width: int, height: int, obstacle_density: float
         return generate_sharp_turn_corridor(width, height, obstacle_density, seed)
     if map_type == "interaction_cross":
         return generate_interaction_cross(width, height, obstacle_density, seed)
+    if map_type == "unknown_pose_overlap":
+        return generate_unknown_pose_overlap(width, height, obstacle_density, seed)
+    if map_type == "unknown_pose_ambiguous":
+        return generate_unknown_pose_ambiguous(width, height, obstacle_density, seed)
     if map_type == "open":
         grid = np.full((height, width), FREE, dtype=np.int8)
         _add_boundaries(grid)

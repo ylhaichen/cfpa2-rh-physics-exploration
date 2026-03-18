@@ -1,0 +1,76 @@
+planning:
+  planner_name: mui_tare_2d
+  topk_candidate_limit: 6
+  reassign_on_reach: true
+  reservation_ttl: 12
+  hysteresis_margin: 0.20
+  weights:
+    w_ig: 1.0
+    w_cost: 0.55
+    w_switch: 0.20
+    w_turn: 0.08
+  penalties:
+    lambda_overlap: 0.55
+    sigma_overlap: null
+    mu_interference: 0.18
+    interference_distance: 2.5
+
+mapping:
+  regime: local_submaps_unknown_pose
+  allowed_rotations_deg: [0, 90, 180, 270]
+  local_map_padding: 20
+
+matching:
+  allowed_rotations_deg: [0, 90, 180, 270]
+  search_dx: 96
+  search_dy: 72
+  top_k_hypotheses: 8
+  candidate_vote_top_k: 48
+  candidate_seed_limit_occ: 72
+  candidate_seed_limit_free: 96
+  translation_refine_radius: 1
+  translation_nms_radius: 3
+  min_steps_before_matching: 24
+  min_known_cells_per_robot: 140
+  min_occupied_cells_per_robot: 14
+  min_overlap_cells: 40
+  accept_min_overlap: 180
+  reject_min_overlap: 20
+  accept_score_threshold: 0.68
+  reject_score_threshold: 0.35
+  ambiguity_gap: 0.08
+  ambiguity_neighbor_radius: 4
+  blacklist_neighbor_radius: 5
+  accept_min_occ_agree: 24
+  accept_min_occ_ratio: 0.12
+  accept_max_mismatch_ratio: 0.06
+  w_occ: 2.0
+  w_free: 0.45
+  w_mismatch: 4.0
+  blacklist_ttl: 50
+
+verification:
+  enabled: true
+  strategy: disagreement_region
+  max_steps: 18
+  max_attempts_per_pair: 2
+  obs_threshold: 14
+  accept_score_threshold: 0.90
+  accept_min_overlap: 260
+  accept_min_occ_agree: 64
+  score_radius: 5
+  lambda_dist: 0.2
+  lambda_risk: 0.5
+
+pre_merge:
+  frontier_topk: 8
+  replan_interval: 5
+
+post_merge:
+  planner_name: cfpa2
+  allow_switch_to_rh: true
+
+metrics:
+  record_merge_attempts: true
+  record_merge_success: true
+  record_verification_stats: true

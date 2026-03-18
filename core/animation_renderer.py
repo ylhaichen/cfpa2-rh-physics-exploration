@@ -84,6 +84,8 @@ class AnimationRenderer:
         last_replan_reason: str,
         sensor_range: int,
         sensor_fov_deg: float,
+        per_robot_observed_cells: dict[int, Sequence[tuple[int, int]]] | None = None,
+        mui_debug: dict | None = None,
     ) -> None:
         if not self.should_draw(step_idx):
             return
@@ -106,6 +108,13 @@ class AnimationRenderer:
             rid = robot.robot_id
             color = ROBOT_COLORS.get(rid, "#FF9800")
             traj_color = TRAJ_COLORS.get(rid, "#FFE082")
+
+            if per_robot_observed_cells is not None and rid in per_robot_observed_cells:
+                pts = per_robot_observed_cells.get(rid, [])
+                if pts:
+                    ox = [p[0] for p in pts]
+                    oy = [p[1] for p in pts]
+                    self.ax.scatter(ox, oy, c=color, s=3, alpha=0.07, marker="s", linewidths=0)
 
             if len(robot.trajectory) >= 2:
                 tx = [p[0] for p in robot.trajectory]
@@ -146,6 +155,31 @@ class AnimationRenderer:
             self.ax.scatter([a.target[0]], [a.target[1]], c=color, s=135, marker="*")
 
         score_txt = f"{joint_score:.2f}" if joint_score is not None and np.isfinite(joint_score) else "-"
+        merge_state = "-"
+        verification_goal = "-"
+        best_hyp_txt = "-"
+        merge_attempts = "-"
+        verification_count = "-"
+        merge_step_txt = "-"
+        if mui_debug:
+            merge_state = str(mui_debug.get("merge_state", "-"))
+            goal = mui_debug.get("verification_goal")
+            if goal is not None:
+                verification_goal = str(tuple(goal))
+                self.ax.scatter([goal[0]], [goal[1]], c="#8E24AA", s=150, marker="P", edgecolors="black", linewidths=0.5)
+            best_hyp = mui_debug.get("best_hypothesis")
+            if isinstance(best_hyp, dict):
+                best_hyp_txt = (
+                    f"rot={best_hyp.get('rotation_deg')} "
+                    f"dx={best_hyp.get('dx')} dy={best_hyp.get('dy')} "
+                    f"s={best_hyp.get('normalized_score', 0.0):.2f} "
+                    f"ov={best_hyp.get('overlap_cells', 0)}"
+                )
+            merge_attempts = str(mui_debug.get("merge_attempt_count", "-"))
+            verification_count = str(mui_debug.get("verification_count", "-"))
+            merge_step_val = mui_debug.get("merge_step")
+            if merge_step_val is not None:
+                merge_step_txt = str(merge_step_val)
         info = (
             f"planner={planner_name}\n"
             f"seed={seed}\n"
@@ -154,7 +188,13 @@ class AnimationRenderer:
             f"frontier_reps={len(frontier_candidates)}\n"
             f"replans={replan_count}\n"
             f"joint_score={score_txt}\n"
-            f"last_replan={last_replan_reason}"
+            f"last_replan={last_replan_reason}\n"
+            f"merge_state={merge_state}\n"
+            f"best_hyp={best_hyp_txt}\n"
+            f"verify_goal={verification_goal}\n"
+            f"merge_attempts={merge_attempts}\n"
+            f"verification_count={verification_count}\n"
+            f"merge_step={merge_step_txt}"
         )
         self.ax.text(
             1.01,
@@ -168,6 +208,19 @@ class AnimationRenderer:
         )
 
         self.ax.set_title("Go2W-like Multi-Robot Exploration (Planner-Level Approximation)")
+        if mui_debug and str(mui_debug.get("merge_state", "")) == "POST_MERGE":
+            self.ax.text(
+                0.02,
+                0.98,
+                "MERGED",
+                transform=self.ax.transAxes,
+                va="top",
+                ha="left",
+                fontsize=14,
+                fontweight="bold",
+                color="#1B5E20",
+                bbox=dict(facecolor="#C8E6C9", alpha=0.85, edgecolor="#1B5E20"),
+            )
         self.ax.set_xlim(-0.5, map_mgr.width - 0.5)
         self.ax.set_ylim(map_mgr.height - 0.5, -0.5)
         self.ax.set_aspect("equal")
